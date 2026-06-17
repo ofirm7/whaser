@@ -11,6 +11,9 @@ registration:
 interface:
   # The conversational "Create new agent" wizard reuses the agents/chat surface.
   agents: true
+  # Phase 3: headless agent invocation via POST /api/agents/v1/chat/completions.
+  # The user's role also needs the REMOTE_AGENTS:USE permission, plus an agent API key.
+  remoteAgents: true
 
 endpoints:
   # Anthropic Claude is a built-in endpoint; the API key comes from ANTHROPIC_API_KEY in .env.
