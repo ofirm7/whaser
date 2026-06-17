@@ -1,0 +1,21 @@
+{
+  "name": "@whaser/agent-builder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Whaser conversational 'Create new agent' wizard backend: slot-filling interview, strict-tool-use extraction, structured AgentSpec synthesis, consistency checks, and AgentSpec -> LibreChat materialization.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
