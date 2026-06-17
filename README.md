@@ -29,7 +29,8 @@ Claude + MCP agent runtime, and the chat/agent UI. Whaser adds, in separate modu
 | Auth / tenancy | **lldap** directory (LDAP) + multi-tenant scoping |
 | Deploy | Docker Compose on a headless Linux VM, Caddy TLS |
 
-Full design in [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
+Full design in [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md); the Claude/AI-feature
+mapping (what Whaser uses, and when) is in [`docs/AI-FEATURES.md`](./docs/AI-FEATURES.md).
 
 ## Getting started
 
@@ -60,7 +61,7 @@ Phased POC build — details in [`docs/ROADMAP.md`](./docs/ROADMAP.md).
 
 ```
 deploy/      docker-compose, Caddyfile, librechat.yaml, .env.example
-docs/        ARCHITECTURE.md, ROADMAP.md, SETUP.md
+docs/        ARCHITECTURE.md, ROADMAP.md, SETUP.md, AI-FEATURES.md
 schemas/     agent-spec.schema.json   (the AgentSpec the wizard emits)
 librechat/   LibreChat v0.8.6 (git submodule; the fork base)
 ```
