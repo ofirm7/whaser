@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Whaser — AI WhatsApp agent builder</title>
+<style>
+  :root { --bg:#0b141a; --panel:#111b21; --panel2:#202c33; --line:#2a3942; --text:#e9edef; --muted:#8696a0; --accent:#00a884; --accent2:#06cf9c; --danger:#f15c6d; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); }
+  a { color:var(--accent2); }
+  header { display:flex; align-items:center; gap:16px; padding:12px 18px; background:var(--panel); border-bottom:1px solid var(--line); }
+  header .logo { font-weight:700; color:var(--accent2); font-size:18px; }
+  header nav { display:flex; gap:6px; margin-left:8px; }
+  header .spacer { flex:1; }
+  header .who { color:var(--muted); font-size:13px; }
+  button { font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--panel2); color:var(--text); padding:8px 14px; border-radius:8px; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#04231c; font-weight:600; }
+  button.ghost { background:transparent; }
+  button.nav { background:transparent; border-color:transparent; color:var(--muted); }
+  button.nav.active { color:var(--text); background:var(--panel2); }
+  button:disabled { opacity:.5; cursor:default; }
+  input, textarea { font:inherit; background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px 12px; width:100%; }
+  .wrap { max-width:880px; margin:0 auto; padding:22px 18px 60px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+  .row { display:flex; gap:12px; align-items:center; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px; }
+  .muted { color:var(--muted); }
+  .badge { font-size:12px; padding:2px 9px; border-radius:999px; border:1px solid var(--line); }
+  .badge.live { color:#04231c; background:var(--accent2); border-color:var(--accent2); }
+  .badge.paused { color:var(--muted); }
+  h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:17px; margin:0 0 10px; }
+  .chat { background:#0b141a; border:1px solid var(--line); border-radius:12px; padding:14px; height:360px; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+  .bub { max-width:78%; padding:8px 11px; border-radius:10px; white-space:pre-wrap; }
+  .bub.bot { align-self:flex-start; background:var(--panel2); }
+  .bub.me { align-self:flex-end; background:#005c4b; }
+  .composer { display:flex; gap:8px; margin-top:10px; }
+  pre { background:#0b141a; border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; font-size:12.5px; }
+  .err { color:var(--danger); }
+  .ok { color:var(--accent2); }
+  .center { min-height:70vh; display:flex; align-items:center; justify-content:center; }
+  .login { width:340px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  .pill { display:inline-block; font-size:12px; background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:2px 9px; margin:2px 4px 2px 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const $ = (h) => { const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content.firstChild; };
+let token = localStorage.getItem('whaser_token');
+let user = JSON.parse(localStorage.getItem('whaser_user') || 'null');
+let view = 'agents';
+
+async function api(path, method='GET', body){
+  const r = await fetch(path, { method, headers:{ 'content-type':'application/json', ...(token?{authorization:'Bearer '+token}:{}) }, body: body?JSON.stringify(body):undefined });
+  if (r.status === 401){ logout(); throw new Error('Session expired — please log in.'); }
+  if (!r.ok){ let e; try{ e=await r.json(); }catch{ e={error:r.statusText}; } throw new Error(e.error || ('HTTP '+r.status)); }
+  return r.status === 204 ? null : r.json();
+}
+function logout(){ token=null; user=null; localStorage.removeItem('whaser_token'); localStorage.removeItem('whaser_user'); render(); }
+function esc(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function render(){
+  const root = document.getElementById('root');
+  root.innerHTML = '';
+  if (!token || !user){ root.appendChild(LoginView()); return; }
+  root.appendChild(Header());
+  const wrap = $('<div class="wrap"></div>');
+  root.appendChild(wrap);
+  if (view === 'agents') AgentsView(wrap);
+  else if (view === 'create') CreateView(wrap);
+  else if (view && view.startsWith('agent:')) AgentDetailView(wrap, view.slice(6));
+}
+
+function Header(){
+  const h = $('<header></header>');
+  h.innerHTML = `<span class="logo">Whaser</span>
+    <nav>
+      <button class="nav ${view==='agents'?'active':''}" data-go="agents">Agents</button>
+      <button class="nav ${view==='create'?'active':''}" data-go="create">+ Create agent</button>
+    </nav>
+    <span class="spacer"></span>
+    <span class="who">${esc(user.displayName)} · ${esc(user.tenantName)} · ${esc(user.role)}</span>
+    <button class="ghost" id="logout">Log out</button>`;
+  h.querySelectorAll('[data-go]').forEach(b=> b.onclick=()=>{ view=b.dataset.go; render(); });
+  h.querySelector('#logout').onclick = logout;
+  return h;
+}
+
+function LoginView(){
+  const c = $('<div class="center"></div>');
+  const card = $('<div class="card login"></div>');
+  card.innerHTML = `<h1>Whaser</h1><div class="muted" style="margin-bottom:8px">AI-driven WhatsApp agent builder</div>
+    <label>Username</label><input id="u" value="alice" autocomplete="username"/>
+    <label>Password</label><input id="p" type="password" value="password" autocomplete="current-password"/>
+    <div style="margin-top:14px" class="row"><button class="primary" id="go">Sign in</button>
+    <span class="muted">via directory (LDAP-like)</span></div>
+    <div class="err" id="e" style="margin-top:10px"></div>
+    <div class="muted" style="margin-top:14px;font-size:12.5px">Try: alice / bob (Acme) · carol (Globex) — password: <code>password</code></div>`;
+  const submit = async ()=>{ try{
+    const d = await api('/api/login','POST',{ username:card.querySelector('#u').value, password:card.querySelector('#p').value });
+    token=d.token; user=d.user; localStorage.setItem('whaser_token',token); localStorage.setItem('whaser_user',JSON.stringify(user)); view='agents'; render();
+  }catch(err){ card.querySelector('#e').textContent = err.message; } };
+  card.querySelector('#go').onclick = submit;
+  card.querySelectorAll('input').forEach(i=> i.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); }));
+  c.appendChild(card); return c;
+}
+
+async function AgentsView(wrap){
+  wrap.appendChild($('<h1>Agents</h1>'));
+  wrap.appendChild($(`<div class="muted" style="margin-bottom:14px">Every agent your tenant (${esc(user.tenantName)}) owns. Create one with the guided conversation.</div>`));
+  try {
+    const { agents } = await api('/api/agents');
+    if (!agents.length){ wrap.appendChild($('<div class="card muted">No agents yet. Click <b>+ Create agent</b> to design one.</div>')); return; }
+    const grid = $('<div class="grid"></div>');
+    for (const a of agents){
+      const card = $('<div class="card" style="cursor:pointer"></div>');
+      card.innerHTML = `<div class="row" style="justify-content:space-between"><b>${esc(a.name)}</b>
+        <span class="badge ${a.status==='live'?'live':'paused'}">${a.status}</span></div>
+        <div class="muted" style="margin:6px 0">${esc(a.goal)}</div>
+        <div><span class="pill">${esc(a.tone)}</span><span class="pill">${esc(a.model)}</span><span class="pill">📱 ${esc(a.phoneNumberId)}</span></div>
+        <div class="muted" style="margin-top:8px;font-size:12.5px">Last activity: ${a.lastActivityAt? new Date(a.lastActivityAt).toLocaleString():'—'}</div>`;
+      card.onclick = ()=>{ view='agent:'+a.id; render(); };
+      grid.appendChild(card);
+    }
+    wrap.appendChild(grid);
+  } catch(err){ wrap.appendChild($(`<div class="card err">${esc(err.message)}</div>`)); }
+}
+
+async function AgentDetailView(wrap, id){
+  wrap.appendChild($('<button class="ghost" id="back">← Agents</button>'));
+  wrap.querySelector('#back').onclick=()=>{ view='agents'; render(); };
+  let a;
+  try { a = await api('/api/agents/'+id); } catch(err){ wrap.appendChild($(`<div class="card err">${esc(err.message)}</div>`)); return; }
+  const head = $('<div class="card"></div>');
+  head.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(a.name)}</h2>
+    <span class="badge ${a.status==='live'?'live':'paused'}">${a.status}</span></div>
+    <div class="muted">${esc(a.goal)}</div>
+    <div style="margin-top:8px">${a.spec.in_scope_topics.map(t=>`<span class="pill">✓ ${esc(t)}</span>`).join('')}
+      ${a.spec.out_of_scope_topics.map(t=>`<span class="pill">✗ ${esc(t)}</span>`).join('')}</div>
+    <div style="margin-top:8px"><span class="pill">${esc(a.model)}</span><span class="pill">📱 ${esc(a.phoneNumberId)}</span>
+      ${a.spec.tools.map(t=>`<span class="pill">🔧 ${esc(t.name)}</span>`).join('')}</div>
+    <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?'Pause':'Resume'}</button>
+    <button class="ghost" id="showspec">View AgentSpec</button></div>
+    <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>`;
+  head.querySelector('#toggle').onclick = async ()=>{ await api('/api/agents/'+id+'/'+(a.status==='live'?'pause':'resume'),'POST'); render(); };
+  head.querySelector('#showspec').onclick = ()=>{ const p=head.querySelector('#spec'); p.style.display = p.style.display==='none'?'block':'none'; };
+  wrap.appendChild(head);
+
+  // WhatsApp simulator
+  const sim = $('<div class="card"></div>');
+  sim.innerHTML = `<h2>WhatsApp simulator</h2><div class="muted" style="margin-bottom:8px">Sends a real inbound message through the gateway → resolver → cost/abuse breaker → agent runtime → reply. (LLM + WhatsApp transport are stubbed locally.)</div>
+    <div class="chat" id="chat"></div>
+    <div class="composer"><input id="msg" placeholder="Message this agent…"/><button class="primary" id="send">Send</button></div>`;
+  wrap.appendChild(sim);
+  const chat = sim.querySelector('#chat');
+  const from = '+15550000001';
+  const addBub = (who, text)=>{ const b=$(`<div class="bub ${who}"></div>`); b.textContent=text; chat.appendChild(b); chat.scrollTop=chat.scrollHeight; };
+  const loadHist = async ()=>{ const {history}=await api('/api/sim/history?agentId='+encodeURIComponent(id)+'&from='+encodeURIComponent(from)); chat.innerHTML=''; history.forEach(m=>addBub(m.role==='user'?'me':'bot', m.content)); if(!history.length) addBub('bot','(no messages yet — say hi)'); };
+  await loadHist();
+  const send = async ()=>{ const inp=sim.querySelector('#msg'); const text=inp.value.trim(); if(!text) return; inp.value=''; addBub('me',text);
+    try{ const out = await api('/api/sim/send','POST',{ agentId:id, from, text }); if(out.reply) addBub('bot', out.reply); else addBub('bot','(no reply'+(out.blocked?': '+out.blocked:'')+')'); }
+    catch(err){ addBub('bot','⚠ '+err.message); } };
+  sim.querySelector('#send').onclick = send;
+  sim.querySelector('#msg').addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });
+}
+
+async function CreateView(wrap){
+  wrap.appendChild($('<h1>Create a new agent</h1>'));
+  wrap.appendChild($('<div class="muted" style="margin-bottom:12px">Answer a few questions — Whaser assembles a precise, validated agent spec. (This is Whaser\'s differentiator: a conversation, not a flow canvas.)</div>'));
+  const card = $('<div class="card"></div>');
+  card.innerHTML = `<div class="chat" id="chat"></div>
+    <div class="composer"><input id="msg" placeholder="Type your answer…" disabled/><button class="primary" id="send" disabled>Send</button></div>
+    <div id="actions" style="margin-top:12px"></div>`;
+  wrap.appendChild(card);
+  const chat=card.querySelector('#chat'), input=card.querySelector('#msg'), sendBtn=card.querySelector('#send'), actions=card.querySelector('#actions');
+  const addBub=(who,text)=>{ const b=$(`<div class="bub ${who}"></div>`); b.textContent=text; chat.appendChild(b); chat.scrollTop=chat.scrollHeight; };
+  let sessionId=null, stage='collecting';
+
+  try {
+    const s = await api('/api/wizard/start','POST');
+    sessionId=s.sessionId; addBub('bot', s.greeting);
+    if (s.prompt.kind==='ask') addBub('bot', s.prompt.question);
+    input.disabled=false; sendBtn.disabled=false; input.focus();
+  } catch(err){ addBub('bot','⚠ '+err.message); return; }
+
+  const ask = async ()=>{ const text=input.value.trim(); if(!text || stage!=='collecting') return; input.value=''; addBub('me',text);
+    const r = await api('/api/wizard/answer','POST',{ sessionId, text });
+    if (r.prompt.kind==='ask'){ addBub('bot', r.prompt.question); }
+    else { stage='confirm'; addBub('bot', r.prompt.text); input.disabled=true; sendBtn.disabled=true; showBuild(); }
+  };
+  sendBtn.onclick = ()=> ask().catch(e=>addBub('bot','⚠ '+e.message));
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter') sendBtn.onclick(); });
+
+  function showBuild(){
+    actions.innerHTML='';
+    const b=$('<button class="primary">Build the agent</button>');
+    b.onclick = async ()=>{ b.disabled=true; try{
+      const r = await api('/api/wizard/finalize','POST',{ sessionId });
+      const box=$('<div class="card" style="margin-top:8px"></div>');
+      const status = r.publishable ? '<span class="ok">✓ valid & consistent — ready to publish</span>'
+        : '<span class="err">needs attention</span>';
+      box.innerHTML = `<h2>Generated AgentSpec</h2><div style="margin-bottom:8px">${status}</div>
+        ${r.schemaErrors.length?`<div class="err">Schema: ${r.schemaErrors.map(esc).join('; ')}</div>`:''}
+        ${r.issues.length?`<div class="err">Consistency: ${r.issues.map(i=>esc(i.message)).join('; ')}</div>`:''}
+        <pre>${esc(JSON.stringify(r.spec,null,2))}</pre>`;
+      actions.appendChild(box);
+      if (r.publishable){ const p=$('<button class="primary" style="margin-top:10px">Publish & bind a number</button>');
+        p.onclick = async ()=>{ p.disabled=true; const pub=await api('/api/wizard/publish','POST',{ sessionId });
+          actions.appendChild($(`<div class="ok" style="margin-top:10px">Published as ${esc(pub.agentId)} on ${esc(pub.phoneNumberId)}. Opening…</div>`));
+          setTimeout(()=>{ view='agent:'+pub.agentId; render(); }, 700); };
+        actions.appendChild(p);
+      }
+    }catch(err){ actions.appendChild($(`<div class="err">${esc(err.message)}</div>`)); b.disabled=false; } };
+    actions.appendChild(b);
+  }
+}
+
+(async function init(){ if (token){ try{ const d=await api('/api/me'); user=d.user; }catch{} } render(); })();
+</script>
+</body>
+</html>
