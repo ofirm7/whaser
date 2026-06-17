@@ -21,10 +21,17 @@ export interface EscalationRule {
   action: string;
 }
 
+export interface ToolParameter {
+  name: string;
+  type: string;
+  description: string;
+  required: boolean;
+}
+
 export interface AgentTool {
   name: string;
   description: string;
-  input_schema: Record<string, unknown>;
+  parameters: ToolParameter[];
   side_effecting: boolean;
 }
 
