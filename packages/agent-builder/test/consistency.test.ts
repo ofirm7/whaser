@@ -31,4 +31,21 @@ describe('checkConsistency', () => {
     expect(codes({ ...validSpec, fallback_message: '' })).toContain('fallback_empty');
     expect(codes({ ...validSpec, goal: '' })).toContain('goal_empty');
   });
+
+  it('flags WAT routing problems', () => {
+    const withSub = {
+      ...validSpec,
+      sub_agents: [{ id: 'sales', name: 'Sales', specialty: 'pricing', tool_names: ['lookup_plan'] }],
+    };
+    // route points at a non-existent sub-agent
+    expect(
+      codes({ ...withSub, workflow: { mode: 'router' as const, routes: [{ intent: 'p', description: 'd', target: 'ghost' }], on_no_match: 'default' as const } }),
+    ).toContain('route_unknown_target');
+    // router with no routes
+    expect(codes({ ...withSub, workflow: { mode: 'router' as const, routes: [], on_no_match: 'default' as const } })).toContain('router_no_routes');
+    // sub-agent references a tool that isn't defined
+    expect(
+      codes({ ...validSpec, sub_agents: [{ id: 's', name: 'S', specialty: 'x', tool_names: ['ghost_tool'] }] }),
+    ).toContain('subagent_unknown_tool');
+  });
 });

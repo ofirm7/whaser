@@ -4,8 +4,8 @@ import { AGENT_SPEC_SCHEMA } from '../src/schema';
 import { validSpec } from './fixtures';
 
 describe('validateAgentSpec', () => {
-  it('loads the canonical schema with all 15 required fields', () => {
-    expect((AGENT_SPEC_SCHEMA as { required: string[] }).required).toHaveLength(15);
+  it('loads the canonical schema with all 17 required fields', () => {
+    expect((AGENT_SPEC_SCHEMA as { required: string[] }).required).toHaveLength(17);
   });
 
   it('accepts a valid spec', () => {

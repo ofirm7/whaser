@@ -1,0 +1,31 @@
+import { WorkflowEngine } from '../../../packages/agent-builder/src/index';
+import type { WorkflowLlm, AgentSpec } from '../../../packages/agent-builder/src/index';
+import type { AgentRuntime, AgentReply, RuntimeMessage } from '../../../packages/whatsapp-gateway/src/agentRuntime';
+
+/**
+ * Bridges the WAT WorkflowEngine to the gateway's AgentRuntime interface. Each inbound message
+ * runs the agent's workflow (route → sub-agent → reply). `lastRoutedTo` exposes which sub-agent
+ * handled the most recent message (surfaced in the simulator UI).
+ */
+export class WorkflowAgentRuntime implements AgentRuntime {
+  lastRoutedTo = 'default';
+
+  constructor(
+    private readonly getSpec: (agentId: string) => AgentSpec | undefined,
+    private readonly llm: WorkflowLlm,
+  ) {}
+
+  async complete({ agentId, messages }: { agentId: string; messages: RuntimeMessage[]; conversationId?: string }): Promise<AgentReply> {
+    const spec = this.getSpec(agentId);
+    if (!spec) {
+      this.lastRoutedTo = 'default';
+      return { text: "This agent isn't available.", usage: { inputTokens: 0, outputTokens: 0 }, finishReason: 'stop' };
+    }
+    const wmsgs = messages
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+    const r = await new WorkflowEngine(spec, this.llm).handle(wmsgs);
+    this.lastRoutedTo = r.routedTo;
+    return { text: r.text, usage: r.usage, finishReason: 'stop' };
+  }
+}

@@ -58,10 +58,17 @@ const SYNTH_SYSTEM = [
   'Derive refusal_policy, greeting, and fallback_message from the persona, goal, and scope.',
   'in_scope_topics and out_of_scope_topics MUST be disjoint.',
   'For each action the user described, emit a tools[] entry with a clear name, a prescriptive',
-  '"call this when..." description, a JSON-Schema input_schema (additionalProperties:false), and',
-  'side_effecting=true only if it writes or calls an external system. version=1. needs_sandbox=true',
-  'only if any tool is side_effecting. model_assignment defaults to claude-sonnet-4-6; use',
-  'claude-opus-4-8 only if the goal needs hard reasoning.',
+  '"call this when..." description, a closed parameters[] list (each {name,type,description,required}),',
+  'and side_effecting=true only if it writes or calls an external system.',
+  'WORKFLOW–AGENT–TOOL: if the agent spans distinct task areas, set workflow.mode="router" with one',
+  'route per area (intent + when-it-applies description + target) and a matching sub_agents[] entry',
+  '(id, name, specialty, tool_names drawn from tools[]); otherwise workflow.mode="single" with empty',
+  'routes and empty sub_agents. Always include both sub_agents and workflow. Set on_no_match="default"',
+  'so greetings and unmatched messages go to the default agent (it still declines out-of-scope via',
+  'refusal_policy); use "handoff" only if every unmatched message must escalate to a human. version=1.',
+  'needs_sandbox=true only if any tool is',
+  'side_effecting. model_assignment defaults to claude-sonnet-4-6; use claude-opus-4-8 only if the goal',
+  'needs hard reasoning.',
 ].join(' ');
 
 /** Drives Anthropic Claude. Inject a real SDK instance (cast to AnthropicLike) or a fake. */

@@ -17,6 +17,8 @@ export const validSpec: AgentSpec = {
       side_effecting: false,
     },
   ],
+  sub_agents: [],
+  workflow: { mode: 'single', routes: [], on_no_match: 'default' },
   knowledge_sources: [{ type: 'text', label: 'FAQ', content: 'Hours: 9-5 weekdays.' }],
   default_language: 'en',
   greeting: "Hi! I'm Acme's assistant — how can I help?",

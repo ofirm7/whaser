@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { authenticate, tenantName } from './directory';
 import { AppState } from './store';
+import type { TuningSuggestion } from '../../../packages/agent-builder/src/index';
 
 interface SessionUser {
   username: string;
@@ -40,6 +41,7 @@ const uiPrompt = (p: { kind: 'ask'; slot: { id: string; question: string } } | {
 const agentSummary = (a: ReturnType<AppState['listAgents']>[number]) => ({
   id: a.id,
   name: a.spec.agent_name,
+  version: a.spec.version,
   status: a.status,
   phoneNumberId: a.phoneNumberId,
   tone: a.spec.brand_persona.tone,
@@ -136,6 +138,21 @@ app.get('/api/agents/:id', wrap(async (req, res, auth) => {
     return;
   }
   res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername });
+}));
+
+app.post('/api/agents/:id/suggest', wrap(async (req, res, auth) => {
+  const r = await state.suggestImprovements(req.params.id, auth.tenantId);
+  if (!r) {
+    res.sendStatus(404);
+    return;
+  }
+  res.json(r);
+}));
+
+app.post('/api/agents/:id/apply', wrap(async (req, res, auth) => {
+  const { suggestions } = (req.body ?? {}) as { suggestions?: TuningSuggestion[] };
+  const a = state.applyImprovements(req.params.id, auth.tenantId, Array.isArray(suggestions) ? suggestions : []);
+  res.json({ id: a.id, version: a.spec.version });
 }));
 
 app.post('/api/agents/:id/:action', wrap(async (req, res, auth) => {
