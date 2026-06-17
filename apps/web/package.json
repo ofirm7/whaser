@@ -1,0 +1,20 @@
+{
+  "name": "@whaser/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-contained Whaser demo app — serves the GUI and wires the real agent-builder + whatsapp-gateway backends with stubbed LLM + WhatsApp transport (no external credentials needed).",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
