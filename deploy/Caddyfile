@@ -1,0 +1,21 @@
+# Whaser reverse proxy + automatic HTTPS.
+# Caddy obtains a Let's Encrypt cert for WHASER_DOMAIN (a real, public DNS A-record pointing
+# at this VM). A valid CA-signed cert is REQUIRED by the WhatsApp Cloud API webhook.
+#
+# In Phase 0 the SPA, the REST API, and (from Phase 2) the WhatsApp webhook are all served by
+# the LibreChat `api` container on port 3080, so a single reverse_proxy covers everything.
+
+{$WHASER_DOMAIN} {
+	encode zstd gzip
+
+	# WhatsApp Cloud API webhook (added in Phase 2; harmless to proxy now).
+	# Meta calls GET (verify) + POST (inbound) here.
+	handle /api/whatsapp/* {
+		reverse_proxy api:3080
+	}
+
+	# Everything else: LibreChat SPA + REST API.
+	handle {
+		reverse_proxy api:3080
+	}
+}

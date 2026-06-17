@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ofirm7/whaser/schemas/agent-spec.schema.json",
+  "title": "Whaser AgentSpec",
+  "description": "The concrete, versioned specification produced by the conversational 'Create new agent' wizard. Authored to obey Anthropic structured-output limits: additionalProperties:false everywhere, no min/max, no minLength/maxLength, no recursion.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "agent_name",
+    "brand_persona",
+    "goal",
+    "in_scope_topics",
+    "out_of_scope_topics",
+    "refusal_policy",
+    "escalation_rules",
+    "tools",
+    "knowledge_sources",
+    "default_language",
+    "greeting",
+    "fallback_message",
+    "model_assignment",
+    "needs_sandbox"
+  ],
+  "properties": {
+    "version": { "type": "integer", "description": "Monotonic spec version (append-only history)." },
+    "agent_name": { "type": "string", "description": "Display/brand name for the agent." },
+    "brand_persona": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tone", "style_notes"],
+      "properties": {
+        "tone": { "type": "string", "description": "e.g. friendly, formal, terse." },
+        "style_notes": { "type": "string", "description": "Freeform voice guidance." }
+      }
+    },
+    "goal": { "type": "string", "description": "The single primary outcome the agent drives toward." },
+    "in_scope_topics": { "type": "array", "items": { "type": "string" }, "description": "Must be disjoint from out_of_scope_topics (consistency check)." },
+    "out_of_scope_topics": { "type": "array", "items": { "type": "string" } },
+    "refusal_policy": { "type": "string", "description": "What to decline and how." },
+    "escalation_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["when", "action"],
+        "properties": {
+          "when": { "type": "string" },
+          "action": { "type": "string", "description": "e.g. handoff, escalate, collect_contact." }
+        }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "description": "Each tool must map to a registered executor/MCP tool at runtime (consistency check).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "description", "input_schema", "side_effecting"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string", "description": "Prescriptive: 'Call this when ...'." },
+          "input_schema": { "type": "object", "description": "JSON Schema for the tool input; additionalProperties:false." },
+          "side_effecting": { "type": "boolean", "description": "If true, requires a capability flag + human-in-the-loop and runs sandboxed." }
+        }
+      }
+    },
+    "knowledge_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "label", "content"],
+        "properties": {
+          "type": { "type": "string", "description": "text | url" },
+          "label": { "type": "string" },
+          "content": { "type": "string" }
+        }
+      }
+    },
+    "default_language": { "type": "string", "description": "BCP-47 language tag, e.g. 'en'." },
+    "greeting": { "type": "string" },
+    "fallback_message": { "type": "string" },
+    "model_assignment": {
+      "type": "string",
+      "description": "Anthropic model id. Default claude-sonnet-4-6; claude-opus-4-8 for hard-reasoning agents.",
+      "enum": ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"]
+    },
+    "needs_sandbox": { "type": "boolean", "description": "If true, runtime uses the sandboxed tool executor instead of in-process tools." }
+  }
+}
