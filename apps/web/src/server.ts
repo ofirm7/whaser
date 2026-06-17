@@ -1,3 +1,4 @@
+import './env';
 import express, { type Request, type Response } from 'express';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -51,7 +52,7 @@ const agentSummary = (a: ReturnType<AppState['listAgents']>[number]) => ({
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
-app.get('/healthz', (_req, res) => res.json({ ok: true, app: 'whaser-web' }));
+app.get('/healthz', (_req, res) => res.json({ ok: true, app: 'whaser-web', mode: state.mode }));
 
 app.post('/api/login', (req: Request, res: Response) => {
   const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
@@ -69,7 +70,7 @@ app.post('/api/login', (req: Request, res: Response) => {
     role: u.role,
   };
   tokens.set(token, user);
-  res.json({ token, user });
+  res.json({ token, user, mode: state.mode });
 });
 
 app.get('/api/me', (req: Request, res: Response) => {
@@ -78,7 +79,7 @@ app.get('/api/me', (req: Request, res: Response) => {
     res.sendStatus(401);
     return;
   }
-  res.json({ user: auth, tenantTokensUsed: state.tenantUsage(auth.tenantId) });
+  res.json({ user: auth, mode: state.mode, tenantTokensUsed: state.tenantUsage(auth.tenantId) });
 });
 
 // --- Wizard ---

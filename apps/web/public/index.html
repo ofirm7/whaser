@@ -50,6 +50,7 @@
 const $ = (h) => { const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content.firstChild; };
 let token = localStorage.getItem('whaser_token');
 let user = JSON.parse(localStorage.getItem('whaser_user') || 'null');
+let mode = 'stub';
 let view = 'agents';
 
 async function api(path, method='GET', body){
@@ -81,6 +82,7 @@ function Header(){
       <button class="nav ${view==='create'?'active':''}" data-go="create">+ Create agent</button>
     </nav>
     <span class="spacer"></span>
+    <span class="badge ${mode==='claude'?'live':'paused'}" title="${mode==='claude'?'Live Claude (ANTHROPIC_API_KEY set)':'Demo mode — set ANTHROPIC_API_KEY for real Claude'}">${mode==='claude'?'● Claude':'● Demo'}</span>
     <span class="who">${esc(user.displayName)} · ${esc(user.tenantName)} · ${esc(user.role)}</span>
     <button class="ghost" id="logout">Log out</button>`;
   h.querySelectorAll('[data-go]').forEach(b=> b.onclick=()=>{ view=b.dataset.go; render(); });
@@ -100,7 +102,7 @@ function LoginView(){
     <div class="muted" style="margin-top:14px;font-size:12.5px">Try: alice / bob (Acme) · carol (Globex) — password: <code>password</code></div>`;
   const submit = async ()=>{ try{
     const d = await api('/api/login','POST',{ username:card.querySelector('#u').value, password:card.querySelector('#p').value });
-    token=d.token; user=d.user; localStorage.setItem('whaser_token',token); localStorage.setItem('whaser_user',JSON.stringify(user)); view='agents'; render();
+    token=d.token; user=d.user; mode=d.mode||'stub'; localStorage.setItem('whaser_token',token); localStorage.setItem('whaser_user',JSON.stringify(user)); view='agents'; render();
   }catch(err){ card.querySelector('#e').textContent = err.message; } };
   card.querySelector('#go').onclick = submit;
   card.querySelectorAll('input').forEach(i=> i.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); }));
@@ -217,7 +219,7 @@ async function CreateView(wrap){
   }
 }
 
-(async function init(){ if (token){ try{ const d=await api('/api/me'); user=d.user; }catch{} } render(); })();
+(async function init(){ if (token){ try{ const d=await api('/api/me'); user=d.user; mode=d.mode||'stub'; }catch{} } render(); })();
 </script>
 </body>
 </html>
