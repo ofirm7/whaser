@@ -61,7 +61,7 @@ Phased POC build — details in [`docs/ROADMAP.md`](./docs/ROADMAP.md).
 
 ```
 deploy/      docker-compose, Caddyfile, librechat.yaml, .env.example
-docs/        ARCHITECTURE.md, ROADMAP.md, SETUP.md, AI-FEATURES.md
+docs/        ARCHITECTURE.md, ROADMAP.md, SETUP.md, AI-FEATURES.md, PHASE3-BRIDGE.md
 schemas/     agent-spec.schema.json   (the AgentSpec the wizard emits)
 librechat/   LibreChat v0.8.6 (git submodule; the fork base)
 ```
