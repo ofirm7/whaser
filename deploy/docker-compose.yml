@@ -1,0 +1,136 @@
+# Whaser deploy stack — extends LibreChat v0.8.6.
+#
+# Run from the repo root:
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d
+#
+# Relative paths resolve against this file's directory (deploy/). The `api` service is NOT
+# published publicly — Caddy is the only ingress (80/443) and terminates TLS, which the
+# WhatsApp Cloud API webhook requires (valid CA cert on a real DNS name).
+#
+# Phase 0 uses LibreChat's prebuilt image. From Phase 2 onward (when we add WhatsApp routes +
+# the wizard), switch `api` to build from the ../librechat submodule — see the `build:` block.
+
+name: whaser
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: whaser-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - WHASER_DOMAIN=${WHASER_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+  api:
+    # Phase 0: prebuilt image. Pin to a digest in production.
+    image: registry.librechat.ai/danny-avila/librechat:latest
+    # Phase 2+: build the fork (adds WhatsApp routes, wizard, dashboard):
+    # build:
+    #   context: ../librechat
+    #   target: node
+    container_name: whaser-librechat
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    depends_on:
+      - mongodb
+      - rag_api
+    expose:
+      - "${PORT:-3080}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - HOST=0.0.0.0
+      - MONGO_URI=mongodb://mongodb:27017/LibreChat
+      - MEILI_HOST=http://meilisearch:7700
+      - RAG_PORT=${RAG_PORT:-8000}
+      - RAG_API_URL=http://rag_api:${RAG_PORT:-8000}
+    env_file:
+      - ./.env
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
+      - lc_images:/app/client/public/images
+      - lc_uploads:/app/uploads
+      - lc_logs:/app/logs
+
+  mongodb:
+    image: mongo:8.0.20
+    container_name: whaser-mongodb
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    command: mongod --noauth
+    volumes:
+      - mongo_data:/data/db
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.35.1
+    container_name: whaser-meilisearch
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      - MEILI_HOST=http://meilisearch:7700
+      - MEILI_NO_ANALYTICS=true
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
+    volumes:
+      - meili_data:/meili_data
+
+  vectordb:
+    image: pgvector/pgvector:0.8.0-pg15-trixie
+    container_name: whaser-vectordb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mydatabase
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mypassword}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  rag_api:
+    image: registry.librechat.ai/danny-avila/librechat-rag-api-dev-lite:latest
+    container_name: whaser-rag-api
+    restart: unless-stopped
+    depends_on:
+      - vectordb
+    environment:
+      - DB_HOST=vectordb
+      - RAG_PORT=${RAG_PORT:-8000}
+    env_file:
+      - ./.env
+
+  # Directory for REQ 4 (LDAP-like multi-tenant user management).
+  # LDAP is reachable only on the internal network (ldap://lldap:3890).
+  # The web admin UI (17170) is bound to localhost — reach it via an SSH tunnel.
+  lldap:
+    image: lldap/lldap:stable
+    container_name: whaser-lldap
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:17170:17170"
+    environment:
+      - UID=${UID:-1000}
+      - GID=${GID:-1000}
+      - LLDAP_JWT_SECRET=${LLDAP_JWT_SECRET}
+      - LLDAP_KEY_SEED=${LLDAP_KEY_SEED}
+      - LLDAP_LDAP_BASE_DN=${LLDAP_BASE_DN}
+      - LLDAP_LDAP_USER_DN=admin
+      - LLDAP_LDAP_USER_PASS=${LLDAP_ADMIN_PASSWORD}
+    volumes:
+      - lldap_data:/data
+
+volumes:
+  caddy_data:
+  caddy_config:
+  mongo_data:
+  meili_data:
+  pgdata:
+  lc_images:
+  lc_uploads:
+  lc_logs:
+  lldap_data:

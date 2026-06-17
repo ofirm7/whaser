@@ -1,52 +1,70 @@
 # Whaser
 
-**A WhatsApp agent creation system driven by AI.**
+**An AI-driven WhatsApp agent creation system.**
 
-Whaser lets you design, configure, and deploy AI-powered conversational agents
-that operate over WhatsApp — without hand-wiring every flow. Describe what you
-want the agent to do, and Whaser handles the messaging plumbing, conversation
-state, and AI reasoning behind it.
+Design a WhatsApp agent through a guided **conversation** — describe what it should do, for
+whom, and how — and Whaser turns that into a concrete, versioned **AgentSpec**, then runs it
+**always-on** against inbound WhatsApp messages under a **non-personal business identity**.
+Multi-tenant, directory-managed users, and one place to manage every agent.
 
-> 🚧 **Status:** early development. The repository currently contains project
-> scaffolding only. APIs and structure are subject to change.
+> 🚧 **Status:** POC in progress. The repository currently contains the Phase 0 scaffolding
+> (deploy overlay, config, AgentSpec schema, docs). See the roadmap below.
 
-## What it does
+## How it's built
 
-- **Agent builder** — create WhatsApp agents from natural-language descriptions
-  of their purpose, tone, and capabilities.
-- **AI-driven conversations** — agents reason over incoming messages using an
-  LLM and respond in context, with memory across a conversation.
-- **Tooling / actions** — let agents take actions (look something up, book,
-  notify, hand off to a human) via pluggable tools.
-- **Multi-agent management** — run and manage multiple distinct agents from one
-  system.
+Whaser is built **on top of [LibreChat](https://github.com/danny-avila/LibreChat)** (MIT,
+pinned to **v0.8.6** as a submodule), which provides LDAP/OIDC auth + multi-user RBAC, a
+Claude + MCP agent runtime, and the chat/agent UI. Whaser adds, in separate modules:
 
-## Planned architecture
+- a **WhatsApp Cloud API** gateway (thin direct client: webhook in, Graph API out),
+- the conversational **"Create new agent"** wizard,
+- **multi-tenant** scoping + per-tenant cost budgets,
+- the **agents dashboard** (status, bound number, activity).
 
-| Layer            | Responsibility                                              |
-| ---------------- | ----------------------------------------------------------- |
-| WhatsApp gateway | Send/receive messages (WhatsApp Web protocol or Cloud API). |
-| Agent runtime    | Conversation state, routing, and turn handling.             |
-| AI core          | LLM-driven reasoning, prompting, and tool/function calling. |
-| Builder          | Define and configure agents from high-level specs.          |
+| Concern | Choice |
+| --- | --- |
+| WhatsApp transport | Meta **Business Cloud API**, direct (non-personal business identity; webhook-based, headless-friendly) |
+| Foundation | Fork of **LibreChat** v0.8.6 |
+| AI core | **Anthropic Claude** — Sonnet 4.6 (interview + replies), Opus 4.8 (spec synthesis), Haiku 4.5 (classification) |
+| Auth / tenancy | **lldap** directory (LDAP) + multi-tenant scoping |
+| Deploy | Docker Compose on a headless Linux VM, Caddy TLS |
+
+Full design in [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
 
 ## Getting started
 
 ```bash
 git clone https://github.com/ofirm7/whaser.git
 cd whaser
-# setup instructions coming soon
+git submodule update --init --recursive
+cp deploy/.env.example deploy/.env   # then fill in (see docs/SETUP.md)
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d
 ```
+
+Full runbook (TLS/domain, Meta WhatsApp setup, lldap, verification) in
+[`docs/SETUP.md`](./docs/SETUP.md).
 
 ## Roadmap
 
-- [ ] WhatsApp connection layer
-- [ ] Core agent runtime and conversation state
-- [ ] AI reasoning + tool-calling integration
-- [ ] Agent definition / builder interface
-- [ ] Persistence and multi-agent management
-- [ ] Deployment tooling
+Phased POC build — details in [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+
+- [ ] **Phase 0** — Fork & deploy LibreChat (HTTPS + Claude)
+- [ ] **Phase 1** — Directory auth (lldap + LibreChat LDAP)
+- [ ] **Phase 2** — WhatsApp Cloud API gateway (echo bot, non-personal identity)
+- [ ] **Phase 3** — Bridge WhatsApp ↔ LibreChat agent runtime
+- [ ] **Phase 4** — Conversational create-agent wizard
+- [ ] **Phase 5** — Agents dashboard + multi-tenant scoping
+- [ ] **Phase 6** — Hardening, DR, observability, demo polish
+
+## Repository layout
+
+```
+deploy/      docker-compose, Caddyfile, librechat.yaml, .env.example
+docs/        ARCHITECTURE.md, ROADMAP.md, SETUP.md
+schemas/     agent-spec.schema.json   (the AgentSpec the wizard emits)
+librechat/   LibreChat v0.8.6 (git submodule; the fork base)
+```
 
 ## License
 
-To be determined.
+MIT (intended; LICENSE file to follow). Built on LibreChat, which is MIT-licensed.

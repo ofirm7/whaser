@@ -1,0 +1,44 @@
+# Whaser LibreChat configuration (mounted at /app/librechat.yaml).
+# Schema reference: https://www.librechat.ai/docs/configuration/librechat_yaml
+version: 1.3.12
+cache: true
+
+# REQ 4: registration is via the LDAP directory (lldap). Disable self-service email signup so
+# accounts come from the directory. (Set ALLOW_REGISTRATION=false in .env as well.)
+registration:
+  socialLogins: []
+
+interface:
+  # The conversational "Create new agent" wizard reuses the agents/chat surface.
+  agents: true
+
+endpoints:
+  # Anthropic Claude is a built-in endpoint; the API key comes from ANTHROPIC_API_KEY in .env.
+  anthropic:
+    # Cheap model for auto-generated conversation titles.
+    titleModel: claude-haiku-4-5
+    streamRate: 20
+    # Pin the visible model list to the Whaser model tiers.
+    models:
+      default:
+        - claude-opus-4-8
+        - claude-sonnet-4-6
+        - claude-haiku-4-5
+      fetch: false
+
+  # Agent runtime defaults (the runtime that answers WhatsApp messages in Phase 3).
+  agents:
+    recursionLimit: 25
+    maxRecursionLimit: 50
+    capabilities:
+      - file_search
+      - actions
+      - tools
+
+# WhatsApp Cloud API will be wrapped as an in-process MCP server (Phase 2/3). Example:
+# mcpServers:
+#   whatsapp:
+#     type: stdio
+#     command: node
+#     args: ["/app/whaser/mcp/whatsapp-server.js"]
+#     timeout: 60000

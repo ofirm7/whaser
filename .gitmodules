@@ -1,0 +1,4 @@
+[submodule "librechat"]
+	path = librechat
+	url = https://github.com/danny-avila/LibreChat.git
+	branch = v0.8.6
