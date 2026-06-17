@@ -51,6 +51,7 @@ const $ = (h) => { const t=document.createElement('template'); t.innerHTML=h.tri
 let token = localStorage.getItem('whaser_token');
 let user = JSON.parse(localStorage.getItem('whaser_user') || 'null');
 let mode = 'stub';
+let whatsapp = { configured:false, phoneNumberId:null, boundAgentId:null };
 let view = 'agents';
 
 async function api(path, method='GET', body){
@@ -102,7 +103,7 @@ function LoginView(){
     <div class="muted" style="margin-top:14px;font-size:12.5px">Try: alice / bob (Acme) · carol (Globex) — password: <code>password</code></div>`;
   const submit = async ()=>{ try{
     const d = await api('/api/login','POST',{ username:card.querySelector('#u').value, password:card.querySelector('#p').value });
-    token=d.token; user=d.user; mode=d.mode||'stub'; localStorage.setItem('whaser_token',token); localStorage.setItem('whaser_user',JSON.stringify(user)); view='agents'; render();
+    token=d.token; user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp; localStorage.setItem('whaser_token',token); localStorage.setItem('whaser_user',JSON.stringify(user)); view='agents'; render();
   }catch(err){ card.querySelector('#e').textContent = err.message; } };
   card.querySelector('#go').onclick = submit;
   card.querySelectorAll('input').forEach(i=> i.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); }));
@@ -149,10 +150,15 @@ async function AgentDetailView(wrap, id){
          <div style="margin-top:4px">${a.spec.sub_agents.map(s=>`<span class="pill">🤖 ${esc(s.name)}${s.tool_names.length?(' ['+s.tool_names.map(esc).join(', ')+']'):''}</span>`).join('')}</div></div>`
       : `<div style="margin-top:10px muted"><b>Workflow:</b> <span class="muted">single agent</span></div>`}
     <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?'Pause':'Resume'}</button>
-    <button class="ghost" id="showspec">View AgentSpec</button></div>
+    <button class="ghost" id="showspec">View AgentSpec</button>
+    ${whatsapp.configured ? `<button id="connectwa" class="${whatsapp.boundAgentId===a.id?'':'primary'}">${whatsapp.boundAgentId===a.id?'✓ WhatsApp connected':'📲 Connect real WhatsApp ('+esc(whatsapp.phoneNumberId)+')'}</button>` : ''}</div>
     <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>`;
   head.querySelector('#toggle').onclick = async ()=>{ await api('/api/agents/'+id+'/'+(a.status==='live'?'pause':'resume'),'POST'); render(); };
   head.querySelector('#showspec').onclick = ()=>{ const p=head.querySelector('#spec'); p.style.display = p.style.display==='none'?'block':'none'; };
+  const cw = head.querySelector('#connectwa');
+  if (cw && whatsapp.boundAgentId!==a.id) cw.onclick = async ()=>{ cw.disabled=true;
+    try{ const r=await api('/api/agents/'+id+'/connect-whatsapp','POST'); whatsapp.boundAgentId=r.boundAgentId; render(); }
+    catch(e){ alert(e.message); cw.disabled=false; } };
   wrap.appendChild(head);
 
   // WhatsApp simulator
@@ -247,7 +253,7 @@ async function CreateView(wrap){
   }
 }
 
-(async function init(){ if (token){ try{ const d=await api('/api/me'); user=d.user; mode=d.mode||'stub'; }catch{} } render(); })();
+(async function init(){ if (token){ try{ const d=await api('/api/me'); user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp; }catch{} } render(); })();
 </script>
 </body>
 </html>

@@ -5,7 +5,10 @@ import { InMemoryConversationStore, conversationKey } from '../../../packages/wh
 import { CircuitBreaker } from '../../../packages/whatsapp-gateway/src/circuitBreaker';
 import { createAgentReplyHandler } from '../../../packages/whatsapp-gateway/src/agentReplyHandler';
 import { hashSender } from '../../../packages/whatsapp-gateway/src/senderHash';
-import type { InboundHandler, InboundMessage } from '../../../packages/whatsapp-gateway/src/types';
+import { CloudApiClient } from '../../../packages/whatsapp-gateway/src/cloudApiClient';
+import { InMemoryJobStore } from '../../../packages/whatsapp-gateway/src/inboundQueue';
+import { InboundWorker } from '../../../packages/whatsapp-gateway/src/worker';
+import type { InboundHandler, InboundMessage, JobStore } from '../../../packages/whatsapp-gateway/src/types';
 import type { RuntimeMessage } from '../../../packages/whatsapp-gateway/src/agentRuntime';
 import type { WorkflowLlm } from '../../../packages/agent-builder/src/index';
 import { StubLlmClient, StubWorkflowLlm, StubTuner } from './stubs';
@@ -75,6 +78,48 @@ export class AppState {
       hashSalt: SALT,
       onBlocked: (reason, msg) => this.lastBlock.set(msg.waMessageId, reason),
     });
+
+    // Real WhatsApp Cloud API: enabled only when all four env vars are present.
+    const env = process.env;
+    if (env.WHATSAPP_VERIFY_TOKEN && env.WHATSAPP_APP_SECRET && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID) {
+      this.waConfig = {
+        verifyToken: env.WHATSAPP_VERIFY_TOKEN,
+        appSecret: env.WHATSAPP_APP_SECRET,
+        phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
+      };
+      this.waStore = new InMemoryJobStore();
+      const gateway = new CloudApiClient({ accessToken: env.WHATSAPP_ACCESS_TOKEN, graphVersion: env.WHATSAPP_GRAPH_VERSION ?? 'v21.0' });
+      // Reuse the SAME WAT reply handler the simulator uses; the worker sends replies via Graph API.
+      this.waWorker = new InboundWorker({ store: this.waStore, gateway, handler: this.handler, onError: (e, m) => console.error('[wa-worker]', m?.waMessageId, e) });
+      this.waWorker.start();
+    }
+  }
+
+  // --- Real WhatsApp wiring (assigned in the constructor when env is present) ---
+  private waConfig: { verifyToken: string; appSecret: string; phoneNumberId: string } | null = null;
+  private waStore: JobStore | null = null;
+  private waWorker: InboundWorker | null = null;
+  private boundAgentId: string | null = null;
+
+  /** Deps for the gateway webhook router, or null when WhatsApp isn't configured. */
+  webhookDeps(): { verifyToken: string; appSecret: string; store: JobStore } | null {
+    if (!this.waConfig || !this.waStore) return null;
+    return { verifyToken: this.waConfig.verifyToken, appSecret: this.waConfig.appSecret, store: this.waStore };
+  }
+
+  whatsappStatus(): { configured: boolean; phoneNumberId: string | null; boundAgentId: string | null } {
+    return { configured: this.waConfig != null, phoneNumberId: this.waConfig?.phoneNumberId ?? null, boundAgentId: this.boundAgentId };
+  }
+
+  /** Bind the configured Cloud API number to an agent so inbound messages route to it. */
+  bindRealNumber(agentId: string, tenantId: string): StoredAgent {
+    if (!this.waConfig) throw new Error('WhatsApp is not configured (set WHATSAPP_* in apps/web/.env)');
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    agent.phoneNumberId = this.waConfig.phoneNumberId;
+    this.resolver.bind(this.waConfig.phoneNumberId, { agentId: agent.id, tenantId });
+    this.boundAgentId = agent.id;
+    return agent;
   }
 
   private id(prefix: string): string {

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { authenticate, tenantName } from './directory';
 import { AppState } from './store';
 import type { TuningSuggestion } from '../../../packages/agent-builder/src/index';
+import { createWebhookRouter } from '../../../packages/whatsapp-gateway/src/express';
 
 interface SessionUser {
   username: string;
@@ -52,6 +53,15 @@ const agentSummary = (a: ReturnType<AppState['listAgents']>[number]) => ({
 });
 
 const app = express();
+
+// Real WhatsApp Cloud API webhook — mounted FIRST so its raw-body parser (needed for the
+// X-Hub-Signature-256 HMAC) runs before the global JSON parser. Only when configured.
+const webhookDeps = state.webhookDeps();
+if (webhookDeps) {
+  app.use('/api/whatsapp/webhook', createWebhookRouter(webhookDeps));
+  console.log('WhatsApp webhook mounted at /api/whatsapp/webhook');
+}
+
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/healthz', (_req, res) => res.json({ ok: true, app: 'whaser-web', mode: state.mode }));
@@ -72,7 +82,7 @@ app.post('/api/login', (req: Request, res: Response) => {
     role: u.role,
   };
   tokens.set(token, user);
-  res.json({ token, user, mode: state.mode });
+  res.json({ token, user, mode: state.mode, whatsapp: state.whatsappStatus() });
 });
 
 app.get('/api/me', (req: Request, res: Response) => {
@@ -81,7 +91,7 @@ app.get('/api/me', (req: Request, res: Response) => {
     res.sendStatus(401);
     return;
   }
-  res.json({ user: auth, mode: state.mode, tenantTokensUsed: state.tenantUsage(auth.tenantId) });
+  res.json({ user: auth, mode: state.mode, whatsapp: state.whatsappStatus(), tenantTokensUsed: state.tenantUsage(auth.tenantId) });
 });
 
 // --- Wizard ---
@@ -138,6 +148,15 @@ app.get('/api/agents/:id', wrap(async (req, res, auth) => {
     return;
   }
   res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername });
+}));
+
+app.get('/api/whatsapp/status', wrap(async (_req, res) => {
+  res.json(state.whatsappStatus());
+}));
+
+app.post('/api/agents/:id/connect-whatsapp', wrap(async (req, res, auth) => {
+  const a = state.bindRealNumber(req.params.id, auth.tenantId);
+  res.json({ id: a.id, phoneNumberId: a.phoneNumberId, boundAgentId: a.id });
 }));
 
 app.post('/api/agents/:id/suggest', wrap(async (req, res, auth) => {
