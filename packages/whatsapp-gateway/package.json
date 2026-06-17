@@ -1,0 +1,23 @@
+{
+  "name": "@whaser/whatsapp-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Whaser WhatsApp Cloud API gateway: HMAC-verified webhook ingestion, durable inbound queue with dedupe, idempotent reply send, and a Phase-2 echo worker.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
