@@ -52,15 +52,29 @@
     },
     "tools": {
       "type": "array",
-      "description": "Each tool must map to a registered executor/MCP tool at runtime (consistency check).",
+      "description": "Each tool must map to a registered executor/MCP tool at runtime (consistency check). Parameters are a closed list (structured-output compatible); the runtime input_schema is derived from them at materialization.",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "description", "input_schema", "side_effecting"],
+        "required": ["name", "description", "parameters", "side_effecting"],
         "properties": {
           "name": { "type": "string" },
           "description": { "type": "string", "description": "Prescriptive: 'Call this when ...'." },
-          "input_schema": { "type": "object", "description": "JSON Schema for the tool input; additionalProperties:false." },
+          "parameters": {
+            "type": "array",
+            "description": "The tool's input parameters.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "type", "description", "required"],
+              "properties": {
+                "name": { "type": "string" },
+                "type": { "type": "string", "description": "JSON type, e.g. string, number, boolean." },
+                "description": { "type": "string" },
+                "required": { "type": "boolean" }
+              }
+            }
+          },
           "side_effecting": { "type": "boolean", "description": "If true, requires a capability flag + human-in-the-loop and runs sandboxed." }
         }
       }

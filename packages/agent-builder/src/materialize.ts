@@ -1,4 +1,16 @@
-import type { AgentSpec } from './schema';
+import type { AgentSpec, AgentTool } from './schema';
+
+/** Derive a JSON-Schema input_schema (closed) from a tool's closed parameter list. */
+function toInputSchema(tool: AgentTool): Record<string, unknown> {
+  const properties: Record<string, unknown> = {};
+  for (const p of tool.parameters) properties[p.name] = { type: p.type, description: p.description };
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties,
+    required: tool.parameters.filter((p) => p.required).map((p) => p.name),
+  };
+}
 
 export interface LibreChatAgentPayload {
   name: string;
@@ -48,7 +60,7 @@ export function toLibreChatAgent(spec: AgentSpec): LibreChatAgentPayload {
     instructions: renderInstructions(spec),
     provider: 'anthropic',
     model: spec.model_assignment,
-    tools: spec.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })),
+    tools: spec.tools.map((t) => ({ name: t.name, description: t.description, input_schema: toInputSchema(t) })),
     metadata: {
       whaser: {
         specVersion: spec.version,

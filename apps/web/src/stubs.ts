@@ -40,7 +40,7 @@ export class StubLlmClient implements LlmClient {
       return {
         name: n,
         description: `Call this when the user needs: ${t}.`,
-        input_schema: { type: 'object', properties: {}, additionalProperties: false },
+        parameters: [],
         side_effecting: false,
       };
     });

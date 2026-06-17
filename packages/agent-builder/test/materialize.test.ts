@@ -19,6 +19,12 @@ describe('materialize', () => {
     expect(agent.provider).toBe('anthropic');
     expect(agent.model).toBe('claude-sonnet-4-6');
     expect(agent.tools.map((t) => t.name)).toEqual(['lookup_plan']);
+    expect(agent.tools[0].input_schema).toEqual({
+      type: 'object',
+      additionalProperties: false,
+      properties: { plan: { type: 'string', description: 'The plan name' } },
+      required: ['plan'],
+    });
     expect(agent.metadata.whaser).toEqual({
       specVersion: 1,
       sideEffectingTools: [],

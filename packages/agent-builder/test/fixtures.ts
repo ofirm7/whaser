@@ -13,7 +13,7 @@ export const validSpec: AgentSpec = {
     {
       name: 'lookup_plan',
       description: 'Call when the user asks about a plan price or limits.',
-      input_schema: { type: 'object', properties: { plan: { type: 'string' } }, required: ['plan'], additionalProperties: false },
+      parameters: [{ name: 'plan', type: 'string', description: 'The plan name', required: true }],
       side_effecting: false,
     },
   ],
