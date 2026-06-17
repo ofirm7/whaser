@@ -136,13 +136,18 @@ async function AgentDetailView(wrap, id){
   let a;
   try { a = await api('/api/agents/'+id); } catch(err){ wrap.appendChild($(`<div class="card err">${esc(err.message)}</div>`)); return; }
   const head = $('<div class="card"></div>');
-  head.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(a.name)}</h2>
+  head.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(a.name)} <span class="muted" style="font-size:13px">v${a.version}</span></h2>
     <span class="badge ${a.status==='live'?'live':'paused'}">${a.status}</span></div>
     <div class="muted">${esc(a.goal)}</div>
     <div style="margin-top:8px">${a.spec.in_scope_topics.map(t=>`<span class="pill">✓ ${esc(t)}</span>`).join('')}
       ${a.spec.out_of_scope_topics.map(t=>`<span class="pill">✗ ${esc(t)}</span>`).join('')}</div>
     <div style="margin-top:8px"><span class="pill">${esc(a.model)}</span><span class="pill">📱 ${esc(a.phoneNumberId)}</span>
       ${a.spec.tools.map(t=>`<span class="pill">🔧 ${esc(t.name)}</span>`).join('')}</div>
+    ${a.spec.workflow.mode==='router'
+      ? `<div style="margin-top:10px"><b>Workflow:</b> router → ${a.spec.sub_agents.length} sub-agents
+         <div style="margin-top:4px">${a.spec.workflow.routes.map(r=>`<span class="pill">🧭 ${esc(r.intent)} → ${esc(r.target)}</span>`).join('')}</div>
+         <div style="margin-top:4px">${a.spec.sub_agents.map(s=>`<span class="pill">🤖 ${esc(s.name)}${s.tool_names.length?(' ['+s.tool_names.map(esc).join(', ')+']'):''}</span>`).join('')}</div></div>`
+      : `<div style="margin-top:10px muted"><b>Workflow:</b> <span class="muted">single agent</span></div>`}
     <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?'Pause':'Resume'}</button>
     <button class="ghost" id="showspec">View AgentSpec</button></div>
     <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>`;
@@ -162,10 +167,33 @@ async function AgentDetailView(wrap, id){
   const loadHist = async ()=>{ const {history}=await api('/api/sim/history?agentId='+encodeURIComponent(id)+'&from='+encodeURIComponent(from)); chat.innerHTML=''; history.forEach(m=>addBub(m.role==='user'?'me':'bot', m.content)); if(!history.length) addBub('bot','(no messages yet — say hi)'); };
   await loadHist();
   const send = async ()=>{ const inp=sim.querySelector('#msg'); const text=inp.value.trim(); if(!text) return; inp.value=''; addBub('me',text);
-    try{ const out = await api('/api/sim/send','POST',{ agentId:id, from, text }); if(out.reply) addBub('bot', out.reply); else addBub('bot','(no reply'+(out.blocked?': '+out.blocked:'')+')'); }
+    try{ const out = await api('/api/sim/send','POST',{ agentId:id, from, text });
+      if(out.reply) addBub('bot', (out.routedTo && out.routedTo!=='default' ? '🧭 routed → '+out.routedTo+'\n' : '') + out.reply);
+      else addBub('bot','(no reply'+(out.blocked?': '+out.blocked:'')+')'); }
     catch(err){ addBub('bot','⚠ '+err.message); } };
   sim.querySelector('#send').onclick = send;
   sim.querySelector('#msg').addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });
+
+  // Self-improvement panel
+  const imp = $('<div class="card"></div>');
+  imp.innerHTML = `<h2>Self-improvement</h2><div class="muted" style="margin-bottom:8px">Reviews recent conversations and proposes AgentSpec edits you approve. Approved changes bump the agent's version.</div>
+    <button id="suggest">Suggest improvements</button><div id="sugg" style="margin-top:10px"></div>`;
+  wrap.appendChild(imp);
+  imp.querySelector('#suggest').onclick = async ()=>{ const box=imp.querySelector('#sugg'); box.innerHTML='<span class="muted">Analyzing transcripts…</span>';
+    try{ const r = await api('/api/agents/'+id+'/suggest','POST');
+      if(!r.suggestions.length){ box.innerHTML='<span class="muted">'+esc(r.summary)+' Chat with the agent above first, then try again.</span>'; return; }
+      box.innerHTML = '<div class="muted" style="margin-bottom:8px">'+esc(r.summary)+'</div>';
+      r.suggestions.forEach((s,i)=>{ const row=$('<label style="display:block;margin:6px 0"></label>');
+        row.innerHTML = `<input type="checkbox" data-i="${i}" checked/> <b>${esc(s.kind)}</b> — ${esc(s.value)} <span class="muted">(${esc(s.rationale)})</span>`;
+        box.appendChild(row); });
+      const apply=$('<button class="primary" style="margin-top:10px">Apply selected</button>');
+      apply.onclick = async ()=>{ apply.disabled=true;
+        const chosen=[...box.querySelectorAll('input[type=checkbox]')].filter(c=>c.checked).map(c=>r.suggestions[+c.dataset.i]);
+        const res = await api('/api/agents/'+id+'/apply','POST',{ suggestions: chosen });
+        box.appendChild($(`<div class="ok" style="margin-top:8px">Applied — agent is now v${res.version}. Reloading…</div>`));
+        setTimeout(()=>render(),800); };
+      box.appendChild(apply);
+    }catch(err){ box.innerHTML='<span class="err">'+esc(err.message)+'</span>'; } };
 }
 
 async function CreateView(wrap){

@@ -15,6 +15,8 @@
     "refusal_policy",
     "escalation_rules",
     "tools",
+    "sub_agents",
+    "workflow",
     "knowledge_sources",
     "default_language",
     "greeting",
@@ -77,6 +79,45 @@
           },
           "side_effecting": { "type": "boolean", "description": "If true, requires a capability flag + human-in-the-loop and runs sandboxed." }
         }
+      }
+    },
+    "sub_agents": {
+      "type": "array",
+      "description": "Specialized sub-agents the workflow routes to (empty for a single-persona agent).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "specialty", "tool_names"],
+        "properties": {
+          "id": { "type": "string", "description": "Stable id referenced by workflow routes." },
+          "name": { "type": "string" },
+          "specialty": { "type": "string", "description": "What this sub-agent handles and how it should behave." },
+          "tool_names": { "type": "array", "items": { "type": "string" }, "description": "Names of tools (from tools[]) this sub-agent may use." }
+        }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How inbound messages are handled: a single default agent, or a router that classifies intent and delegates to a sub-agent.",
+      "required": ["mode", "routes", "on_no_match"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["single", "router"] },
+        "routes": {
+          "type": "array",
+          "description": "Router mode only: intent -> sub-agent. Empty for single mode.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["intent", "description", "target"],
+            "properties": {
+              "intent": { "type": "string", "description": "Short intent label." },
+              "description": { "type": "string", "description": "When this route applies (used by the classifier)." },
+              "target": { "type": "string", "description": "sub_agents[].id that handles this intent." }
+            }
+          }
+        },
+        "on_no_match": { "type": "string", "enum": ["default", "handoff"], "description": "What to do when no route matches." }
       }
     },
     "knowledge_sources": {

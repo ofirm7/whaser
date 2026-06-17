@@ -7,7 +7,11 @@ export type ConsistencyCode =
   | 'tool_duplicate'
   | 'tool_no_executor'
   | 'greeting_empty'
-  | 'fallback_empty';
+  | 'fallback_empty'
+  | 'router_no_routes'
+  | 'route_unknown_target'
+  | 'subagent_duplicate_id'
+  | 'subagent_unknown_tool';
 
 export interface ConsistencyIssue {
   code: ConsistencyCode;
@@ -47,6 +51,29 @@ export function checkConsistency(spec: AgentSpec, opts?: { knownExecutors?: stri
     seen.add(norm(name));
     if (known && !known.has(norm(name))) {
       issues.push({ code: 'tool_no_executor', message: `tool "${name}" has no registered executor` });
+    }
+  }
+
+  // WAT: sub-agents + workflow routing must be coherent.
+  const toolNames = new Set(spec.tools.map((t) => norm(t.name)));
+  const subAgentIds = new Set<string>();
+  for (const sa of spec.sub_agents) {
+    if (subAgentIds.has(sa.id)) issues.push({ code: 'subagent_duplicate_id', message: `duplicate sub-agent id: ${sa.id}` });
+    subAgentIds.add(sa.id);
+    for (const tn of sa.tool_names) {
+      if (!toolNames.has(norm(tn))) {
+        issues.push({ code: 'subagent_unknown_tool', message: `sub-agent "${sa.id}" references unknown tool "${tn}"` });
+      }
+    }
+  }
+  if (spec.workflow.mode === 'router') {
+    if (spec.workflow.routes.length === 0) {
+      issues.push({ code: 'router_no_routes', message: 'router workflow has no routes' });
+    }
+    for (const r of spec.workflow.routes) {
+      if (!subAgentIds.has(r.target)) {
+        issues.push({ code: 'route_unknown_target', message: `route "${r.intent}" targets unknown sub-agent "${r.target}"` });
+      }
     }
   }
 

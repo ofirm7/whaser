@@ -41,6 +41,25 @@ export interface KnowledgeSource {
   content: string;
 }
 
+export interface SubAgent {
+  id: string;
+  name: string;
+  specialty: string;
+  tool_names: string[];
+}
+
+export interface WorkflowRoute {
+  intent: string;
+  description: string;
+  target: string;
+}
+
+export interface Workflow {
+  mode: 'single' | 'router';
+  routes: WorkflowRoute[];
+  on_no_match: 'default' | 'handoff';
+}
+
 export interface AgentSpec {
   version: number;
   agent_name: string;
@@ -51,6 +70,8 @@ export interface AgentSpec {
   refusal_policy: string;
   escalation_rules: EscalationRule[];
   tools: AgentTool[];
+  sub_agents: SubAgent[];
+  workflow: Workflow;
   knowledge_sources: KnowledgeSource[];
   default_language: string;
   greeting: string;

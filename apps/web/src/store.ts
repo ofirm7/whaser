@@ -1,14 +1,16 @@
-import { AgentBuilder, AnthropicLlmClient } from '../../../packages/agent-builder/src/index';
-import type { AgentSpec, SlotValues } from '../../../packages/agent-builder/src/index';
+import { AgentBuilder, AnthropicLlmClient, AnthropicTuner, applySuggestions, validateAgentSpec, checkConsistency } from '../../../packages/agent-builder/src/index';
+import type { AgentSpec, SlotValues, Tuner, TranscriptTurn, TuningSuggestion, TuningResult } from '../../../packages/agent-builder/src/index';
 import { InMemoryAgentResolver } from '../../../packages/whatsapp-gateway/src/agentResolver';
 import { InMemoryConversationStore, conversationKey } from '../../../packages/whatsapp-gateway/src/conversationStore';
 import { CircuitBreaker } from '../../../packages/whatsapp-gateway/src/circuitBreaker';
 import { createAgentReplyHandler } from '../../../packages/whatsapp-gateway/src/agentReplyHandler';
 import { hashSender } from '../../../packages/whatsapp-gateway/src/senderHash';
 import type { InboundHandler, InboundMessage } from '../../../packages/whatsapp-gateway/src/types';
-import type { AgentRuntime, RuntimeMessage } from '../../../packages/whatsapp-gateway/src/agentRuntime';
-import { StubLlmClient, StubAgentRuntime } from './stubs';
-import { makeAnthropicLike, AnthropicAgentRuntime } from './anthropic';
+import type { RuntimeMessage } from '../../../packages/whatsapp-gateway/src/agentRuntime';
+import type { WorkflowLlm } from '../../../packages/agent-builder/src/index';
+import { StubLlmClient, StubWorkflowLlm, StubTuner } from './stubs';
+import { makeAnthropicLike, AnthropicWorkflowLlm } from './anthropic';
+import { WorkflowAgentRuntime } from './workflowRuntime';
 
 export type RuntimeModeName = 'claude' | 'stub';
 
@@ -42,23 +44,29 @@ export class AppState {
   private readonly resolver = new InMemoryAgentResolver();
   private readonly conversations = new InMemoryConversationStore();
   private readonly breaker = new CircuitBreaker({ perSenderPerMinute: 20, maxInboundChars: 4000, tenantDailyTokenBudget: 2_000_000 });
-  private readonly runtime: AgentRuntime;
+  private readonly runtime: WorkflowAgentRuntime;
+  private readonly tuner: Tuner;
   private readonly handler: InboundHandler;
   private readonly lastBlock = new Map<string, string>();
+  private readonly transcripts = new Map<string, TranscriptTurn[]>();
   private seq = 0;
 
   constructor() {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     const getSpec = (agentId: string): AgentSpec | undefined => this.agents.get(agentId)?.spec;
+    let workflowLlm: WorkflowLlm;
     if (apiKey) {
       this.mode = 'claude';
       this.builder = new AgentBuilder(new AnthropicLlmClient({ client: makeAnthropicLike(apiKey) }));
-      this.runtime = new AnthropicAgentRuntime(apiKey, getSpec);
+      workflowLlm = new AnthropicWorkflowLlm(apiKey);
+      this.tuner = new AnthropicTuner({ client: makeAnthropicLike(apiKey) });
     } else {
       this.mode = 'stub';
       this.builder = new AgentBuilder(new StubLlmClient());
-      this.runtime = new StubAgentRuntime(getSpec);
+      workflowLlm = new StubWorkflowLlm();
+      this.tuner = new StubTuner();
     }
+    this.runtime = new WorkflowAgentRuntime(getSpec, workflowLlm);
     this.handler = createAgentReplyHandler({
       resolver: this.resolver,
       runtime: this.runtime,
@@ -126,15 +134,40 @@ export class AppState {
   }
 
   // --- WhatsApp simulator (exercises the real gateway pipeline) ---
-  async simulateInbound(agentId: string, tenantId: string, from: string, text: string): Promise<{ reply: string | null; blocked: string | null; status: string } | null> {
+  async simulateInbound(agentId: string, tenantId: string, from: string, text: string): Promise<{ reply: string | null; blocked: string | null; status: string; routedTo: string | null } | null> {
     const agent = this.getAgent(agentId, tenantId);
     if (!agent) return null;
-    if (agent.status !== 'live') return { reply: null, blocked: 'agent_paused', status: agent.status };
+    if (agent.status !== 'live') return { reply: null, blocked: 'agent_paused', status: agent.status, routedTo: null };
     const waMessageId = `sim-${++this.seq}`;
     const msg: InboundMessage = { waMessageId, from, phoneNumberId: agent.phoneNumberId, type: 'text', text, timestamp: this.now() };
     const out = await this.handler(msg);
     agent.lastActivityAt = this.now();
-    return { reply: out?.text ?? null, blocked: this.lastBlock.get(waMessageId) ?? null, status: agent.status };
+    const blocked = this.lastBlock.get(waMessageId) ?? null;
+    // Record a flat per-agent transcript for self-tuning (capped).
+    const t = this.transcripts.get(agentId) ?? [];
+    t.push({ role: 'user', content: text });
+    if (out?.text) t.push({ role: 'assistant', content: out.text });
+    this.transcripts.set(agentId, t.slice(-40));
+    return { reply: out?.text ?? null, blocked, status: agent.status, routedTo: out ? this.runtime.lastRoutedTo : null };
+  }
+
+  // --- Self-improvement (spec self-tuning from transcripts) ---
+  async suggestImprovements(agentId: string, tenantId: string): Promise<TuningResult | null> {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) return null;
+    return this.tuner.suggest({ spec: agent.spec, transcripts: this.transcripts.get(agentId) ?? [] });
+  }
+
+  applyImprovements(agentId: string, tenantId: string, suggestions: TuningSuggestion[]): StoredAgent {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    const next = applySuggestions(agent.spec, suggestions);
+    const schema = validateAgentSpec(next);
+    if (!schema.valid) throw new Error(`improved spec invalid: ${schema.errors.join('; ')}`);
+    const issues = checkConsistency(next);
+    if (issues.length) throw new Error(`improved spec inconsistent: ${issues.map((i) => i.message).join('; ')}`);
+    agent.spec = next;
+    return agent;
   }
 
   async history(agentId: string, tenantId: string, from: string): Promise<RuntimeMessage[]> {

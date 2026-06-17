@@ -30,6 +30,8 @@ describe('materialize', () => {
       sideEffectingTools: [],
       needsSandbox: false,
       defaultLanguage: 'en',
+      workflowMode: 'single',
+      subAgentIds: [],
     });
   });
 

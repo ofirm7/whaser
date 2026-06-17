@@ -25,6 +25,8 @@ export interface LibreChatAgentPayload {
       sideEffectingTools: string[];
       needsSandbox: boolean;
       defaultLanguage: string;
+      workflowMode: 'single' | 'router';
+      subAgentIds: string[];
     };
   };
 }
@@ -67,6 +69,8 @@ export function toLibreChatAgent(spec: AgentSpec): LibreChatAgentPayload {
         sideEffectingTools: spec.tools.filter((t) => t.side_effecting).map((t) => t.name),
         needsSandbox: spec.needs_sandbox,
         defaultLanguage: spec.default_language,
+        workflowMode: spec.workflow.mode,
+        subAgentIds: spec.sub_agents.map((s) => s.id),
       },
     },
   };
