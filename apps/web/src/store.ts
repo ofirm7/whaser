@@ -1,4 +1,4 @@
-import { AgentBuilder } from '../../../packages/agent-builder/src/index';
+import { AgentBuilder, AnthropicLlmClient } from '../../../packages/agent-builder/src/index';
 import type { AgentSpec, SlotValues } from '../../../packages/agent-builder/src/index';
 import { InMemoryAgentResolver } from '../../../packages/whatsapp-gateway/src/agentResolver';
 import { InMemoryConversationStore, conversationKey } from '../../../packages/whatsapp-gateway/src/conversationStore';
@@ -6,8 +6,11 @@ import { CircuitBreaker } from '../../../packages/whatsapp-gateway/src/circuitBr
 import { createAgentReplyHandler } from '../../../packages/whatsapp-gateway/src/agentReplyHandler';
 import { hashSender } from '../../../packages/whatsapp-gateway/src/senderHash';
 import type { InboundHandler, InboundMessage } from '../../../packages/whatsapp-gateway/src/types';
-import type { RuntimeMessage } from '../../../packages/whatsapp-gateway/src/agentRuntime';
+import type { AgentRuntime, RuntimeMessage } from '../../../packages/whatsapp-gateway/src/agentRuntime';
 import { StubLlmClient, StubAgentRuntime } from './stubs';
+import { makeAnthropicLike, AnthropicAgentRuntime } from './anthropic';
+
+export type RuntimeModeName = 'claude' | 'stub';
 
 const SALT = 'whaser-demo-salt';
 
@@ -31,18 +34,31 @@ export interface WizardSession {
 }
 
 export class AppState {
-  readonly builder = new AgentBuilder(new StubLlmClient());
+  /** 'claude' when ANTHROPIC_API_KEY is set, else 'stub'. */
+  readonly mode: RuntimeModeName;
+  readonly builder: AgentBuilder;
   private readonly agents = new Map<string, StoredAgent>();
   private readonly sessions = new Map<string, WizardSession>();
   private readonly resolver = new InMemoryAgentResolver();
   private readonly conversations = new InMemoryConversationStore();
   private readonly breaker = new CircuitBreaker({ perSenderPerMinute: 20, maxInboundChars: 4000, tenantDailyTokenBudget: 2_000_000 });
-  private readonly runtime = new StubAgentRuntime((agentId) => this.agents.get(agentId)?.spec);
+  private readonly runtime: AgentRuntime;
   private readonly handler: InboundHandler;
   private readonly lastBlock = new Map<string, string>();
   private seq = 0;
 
   constructor() {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const getSpec = (agentId: string): AgentSpec | undefined => this.agents.get(agentId)?.spec;
+    if (apiKey) {
+      this.mode = 'claude';
+      this.builder = new AgentBuilder(new AnthropicLlmClient({ client: makeAnthropicLike(apiKey) }));
+      this.runtime = new AnthropicAgentRuntime(apiKey, getSpec);
+    } else {
+      this.mode = 'stub';
+      this.builder = new AgentBuilder(new StubLlmClient());
+      this.runtime = new StubAgentRuntime(getSpec);
+    }
     this.handler = createAgentReplyHandler({
       resolver: this.resolver,
       runtime: this.runtime,

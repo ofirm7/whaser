@@ -33,9 +33,25 @@ Log in as `alice` / `bob` (tenant **Acme**) or `carol` (tenant **Globex**) — p
 4. **LDAP-like multi-tenant users** — directory login; agents are tenant-scoped (Globex can't see Acme's).
 5. **Agents area** — `/agents`: dashboard of every agent with status, bound number, last activity, drill-down + WhatsApp simulator.
 
-## Going to production
+## Connect it to Claude (live AI)
 
-Swap the two stubs for the real implementations already in the packages:
-`AnthropicLlmClient` (inject `new Anthropic({ apiKey })`) and `LibreChatAgentClient` +
-`CloudApiGateway`, and back the stores with MongoDB. See `docs/PHASE3-BRIDGE.md`,
-`docs/PHASE4-WIZARD.md`, and `docs/SETUP.md`.
+Set `ANTHROPIC_API_KEY` and the app **automatically** switches from the stubs to real Claude —
+the wizard's extraction (Sonnet 4.6) + AgentSpec synthesis (Opus 4.8) via `AnthropicLlmClient`,
+and the simulator's replies via a direct Claude runtime. The header shows **● Claude** vs **● Demo**.
+
+```bash
+# either an env var…
+ANTHROPIC_API_KEY=sk-ant-... PORT=8080 npm start
+
+# …or a gitignored file the server auto-loads:
+echo 'ANTHROPIC_API_KEY=sk-ant-...' > apps/web/.env
+PORT=8080 npm start
+```
+
+Nothing else changes — same GUI, same code paths, now backed by Claude.
+
+## Going to full production (LibreChat fork)
+
+The demo's direct Claude runtime is the `@anthropic-ai/sdk` fallback path. For the full system,
+back the stores with MongoDB and swap the simulator's runtime for `LibreChatAgentClient` +
+`CloudApiGateway` (real WhatsApp). See `docs/PHASE3-BRIDGE.md`, `docs/PHASE4-WIZARD.md`, `docs/SETUP.md`.
