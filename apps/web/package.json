@@ -6,7 +6,8 @@
   "description": "Self-contained Whaser demo app — serves the GUI and wires the real agent-builder + whatsapp-gateway backends with stubbed LLM + WhatsApp transport (no external credentials needed).",
   "scripts": {
     "start": "tsx src/server.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "catalog:validate": "tsx src/validateCatalog.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.2",
