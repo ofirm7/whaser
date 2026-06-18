@@ -1,6 +1,8 @@
 import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import { fileURLToPath } from 'node:url';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 export type LinkStatus = 'disconnected' | 'connecting' | 'qr' | 'connected';
 
@@ -10,6 +12,15 @@ const silentLogger: any = {
   child: () => silentLogger,
   trace() {}, debug() {}, info() {}, warn() {}, error() {}, fatal() {},
 };
+
+// Normalize a WhatsApp timestamp (UNIX seconds as number | protobuf Long | null) to ms-since-epoch.
+function toMs(t: any): number {
+  if (t == null) return 0;
+  if (typeof t === 'number') return t * 1000;
+  if (typeof t.toNumber === 'function') return t.toNumber() * 1000;
+  const n = Number(t);
+  return Number.isFinite(n) ? n * 1000 : 0;
+}
 
 /**
  * POC-only: links a personal WhatsApp account via the unofficial WhatsApp-Web protocol
@@ -21,6 +32,7 @@ export interface ChatEntry {
   id: string;
   name: string;
   isGroup: boolean;
+  ts: number; // last-activity, ms since epoch (0 = unknown)
 }
 
 export class BaileysChannel {
@@ -30,10 +42,35 @@ export class BaileysChannel {
   private qrDataUrl: string | null = null;
   private me: string | null = null;
   private readonly chats = new Map<string, ChatEntry>();
+  // jid -> profile photo URL ('' = known no-photo, negative cache). Short-lived; cleared on reconnect.
+  private readonly photoCache = new Map<string, { url: string; at: number }>();
+  private static readonly PHOTO_TTL_MS = 10 * 60 * 1000; // CDN URLs live ~days, but the user may change the pic
   private readonly authDir = fileURLToPath(new URL('../.wa-auth', import.meta.url));
+  // Persist the captured chat list so it survives restarts (the history sync only fires on a fresh pair).
+  private readonly chatsFile = fileURLToPath(new URL('../.data/wa-chats.json', import.meta.url));
+  private saveTimer: any = null;
 
   /** onInbound receives (chatJid, senderId, text) and returns the reply text (or null to ignore). */
-  constructor(private readonly onInbound: (jid: string, from: string, text: string) => Promise<string | null>) {}
+  constructor(private readonly onInbound: (jid: string, from: string, text: string) => Promise<string | null>) {
+    try {
+      if (existsSync(this.chatsFile)) {
+        const arr = JSON.parse(readFileSync(this.chatsFile, 'utf8'));
+        if (Array.isArray(arr)) for (const c of arr) if (c?.id) this.chats.set(c.id, { id: c.id, name: c.name ?? this.numberOf(c.id), isGroup: !!c.isGroup, ts: c.ts ?? 0 });
+      }
+    } catch { /* ignore */ }
+  }
+
+  private saveChats(): void {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      try {
+        const dir = dirname(this.chatsFile);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(this.chatsFile, JSON.stringify([...this.chats.values()]));
+      } catch { /* ignore */ }
+    }, 1500);
+  }
 
   getStatus(): { status: LinkStatus; qrDataUrl: string | null; me: string | null } {
     return { status: this.status, qrDataUrl: this.qrDataUrl, me: this.me };
@@ -43,24 +80,60 @@ export class BaileysChannel {
     return jid.split('@')[0].split(':')[0];
   }
 
-  private recordChat(id: string | undefined | null, name?: string | null): void {
+  private recordChat(id: string | undefined | null, name?: string | null, tsSeconds?: any): void {
     if (!id || id === 'status@broadcast' || !(id.endsWith('@s.whatsapp.net') || id.endsWith('@g.us'))) return;
     const isGroup = id.endsWith('@g.us');
     const existing = this.chats.get(id);
-    const resolved = (name && name.trim()) || existing?.name || this.numberOf(id);
-    this.chats.set(id, { id, name: resolved, isGroup });
+    const num = this.numberOf(id);
+    // A "real" name is non-empty, not the WhatsApp "." placeholder, and not just the bare number.
+    const real = (s?: string | null) => { const t = (s ?? '').trim(); return t && t !== '.' && t !== num ? t : ''; };
+    const resolved = real(name) || real(existing?.name) || num;
+    const ts = Math.max(toMs(tsSeconds), existing?.ts ?? 0); // never lower an existing recency
+    this.chats.set(id, { id, name: resolved, isGroup, ts });
+    this.saveChats();
   }
 
-  /** Search known chats/contacts (individuals + groups) by name or number. */
-  listChats(query = '', limit = 40): ChatEntry[] {
+  /** Search known chats/contacts (individuals + groups), most-recent first; capped at `limit`. */
+  listChats(query = '', limit = 100): ChatEntry[] {
     const q = query.trim().toLowerCase();
     const all = [...this.chats.values()].filter((c) => !q || c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
-    all.sort((a, b) => {
-      // groups first, then by name
-      if (a.isGroup !== b.isGroup) return a.isGroup ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
+    const junk = (n: string) => /^[\s.,_·\-–—:;'"!?()]+$/.test(n); // name is only punctuation (e.g. "..", "...")
+    // recency desc; then real names before punctuation-only/number-only; then alphabetical.
+    all.sort((a, b) =>
+      (b.ts - a.ts) ||
+      (Number(junk(a.name)) - Number(junk(b.name))) ||
+      a.name.localeCompare(b.name));
     return all.slice(0, limit);
+  }
+
+  /**
+   * Lazily resolve a chat's profile photo URL (preview/low-res), or null when there's no available
+   * photo (private/none/not-a-contact — those THROW in Baileys, so we catch + negative-cache).
+   * Times out → not cached (retries next call).
+   */
+  async profilePhoto(jid: string): Promise<string | null> {
+    if (!jid || !(jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us'))) return null;
+    const hit = this.photoCache.get(jid);
+    if (hit && Date.now() - hit.at < BaileysChannel.PHOTO_TTL_MS) return hit.url || null;
+    if (!this.sock || this.status !== 'connected') return hit ? hit.url || null : null;
+    try {
+      const url = await this.sock.profilePictureUrl(jid, 'preview');
+      // Verified against Baileys rc13 source: a no-photo contact returns an ERROR IQ → throws
+      // (handled below); a query TIMEOUT is swallowed by waitForMessage and resolves to `undefined`
+      // (socket.js:104-111). So: undefined == timeout → DON'T cache (retry next call).
+      if (typeof url !== 'string' || !url) {
+        if (url === undefined) return null;
+        this.photoCache.set(jid, { url: '', at: Date.now() });
+        return null;
+      }
+      this.photoCache.set(jid, { url, at: Date.now() });
+      return url;
+    } catch {
+      // Thrown = error IQ: 404 item-not-found / 401 not-authorized / 403 forbidden → no available
+      // photo. Negative-cache so we don't re-hammer WhatsApp for the (common) photo-less chats.
+      this.photoCache.set(jid, { url: '', at: Date.now() });
+      return null;
+    }
   }
 
   async start(): Promise<void> {
@@ -68,20 +141,31 @@ export class BaileysChannel {
     this.starting = true;
     this.status = 'connecting';
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
-    const sock = makeWASocket({ auth: state, logger: silentLogger, browser: ['Whaser', 'Chrome', '1.0'] });
+    const sock = makeWASocket({
+      auth: state,
+      logger: silentLogger,
+      browser: ['Whaser', 'Chrome', '1.0'],
+      // Speed: don't pull full history (rc13 defaults syncFullHistory:true). The recent slice
+      // carries the latest chats, which is all the picker needs. Stay offline so the phone keeps
+      // pushing recent data. (rc13's default shouldSyncHistoryMessage already rejects FULL.)
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+    });
     this.sock = sock;
     this.starting = false;
 
     sock.ev.on('creds.update', saveCreds);
 
     // Capture chats + contacts for the chat picker.
+    const contactName = (c: any) => c.name ?? c.verifiedName ?? c.notify ?? c.username;
     sock.ev.on('messaging-history.set', (h: any) => {
-      for (const c of h?.contacts ?? []) this.recordChat(c.id, c.name ?? c.notify ?? c.verifiedName);
-      for (const c of h?.chats ?? []) this.recordChat(c.id, c.name);
+      for (const c of h?.contacts ?? []) this.recordChat(c.id, contactName(c));
+      for (const c of h?.chats ?? []) this.recordChat(c.id, c.name, c.conversationTimestamp ?? c.lastMessageRecvTimestamp);
     });
-    sock.ev.on('contacts.upsert', (cs: any[]) => { for (const c of cs ?? []) this.recordChat(c.id, c.name ?? c.notify ?? c.verifiedName); });
-    sock.ev.on('contacts.update', (cs: any[]) => { for (const c of cs ?? []) this.recordChat(c.id, c.name ?? c.notify ?? c.verifiedName); });
-    sock.ev.on('chats.upsert', (cs: any[]) => { for (const c of cs ?? []) this.recordChat(c.id, c.name); });
+    sock.ev.on('contacts.upsert', (cs: any[]) => { for (const c of cs ?? []) this.recordChat(c.id, contactName(c)); });
+    sock.ev.on('contacts.update', (cs: any[]) => { for (const c of cs ?? []) this.recordChat(c.id, contactName(c)); });
+    sock.ev.on('chats.upsert', (cs: any[]) => { for (const c of cs ?? []) this.recordChat(c.id, c.name, c.conversationTimestamp ?? c.lastMessageRecvTimestamp); });
+    sock.ev.on('chats.update', (cs: any[]) => { for (const c of cs ?? []) this.recordChat(c.id, c.name, c.conversationTimestamp ?? c.lastMessageRecvTimestamp); });
 
     sock.ev.on('connection.update', async (u: any) => {
       if (u.qr) {
@@ -91,6 +175,7 @@ export class BaileysChannel {
       if (u.connection === 'open') {
         this.status = 'connected';
         this.qrDataUrl = null;
+        this.photoCache.clear(); // drop possibly-expired signed URLs on a fresh connection
         this.me = sock.user?.id ? String(sock.user.id).split(':')[0].split('@')[0] : null;
         // Fetch group subjects so groups show readable names in the picker.
         try {
@@ -121,6 +206,8 @@ export class BaileysChannel {
         // (resolver binding) decides whether to actually reply.
         if (!jid || jid === 'status@broadcast' || jid.endsWith('@broadcast')) continue;
         if (!(jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us'))) continue;
+        // Bump recency so an active chat floats to the top; pushName names a 1:1 contact.
+        this.recordChat(jid, jid.endsWith('@g.us') ? undefined : m.pushName, m.messageTimestamp);
         const text: string = m.message.conversation ?? m.message.extendedTextMessage?.text ?? '';
         if (!text.trim()) continue;
         const from = this.numberOf(jid);

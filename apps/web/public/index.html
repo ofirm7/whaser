@@ -42,6 +42,9 @@
   .login { width:340px; }
   label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
   .pill { display:inline-block; font-size:12px; background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:2px 9px; margin:2px 4px 2px 0; }
+  .wa-av { display:inline-block; border-radius:50%; background:#3b4a54; color:#e9edef; text-align:center; vertical-align:middle; font-weight:600; background-size:cover; background-position:center; overflow:hidden; flex:0 0 auto; }
+  .wa-av.grp { background:#1f5132; color:#d7f5e3; }
+  .wa-av.img { background-color:transparent; color:transparent; }
 </style>
 </head>
 <body>
@@ -303,6 +306,15 @@ async function ActivityView(wrap){
 // Reusable chat allow-list picker (used by the wizard and by "Edit chats"). Renders into
 // `container`; calls onSave(chats, saveBtn) when the user confirms. Falls back to a link prompt
 // when WhatsApp isn't connected.
+// --- WhatsApp avatar helpers: initials fallback rendered instantly, photo swapped in lazily ---
+const _waPhotoCache = new Map(); // jid -> Promise<string|null> (dedupes in-flight + caches result)
+function waPhoto(jid){ if(!_waPhotoCache.has(jid)){ _waPhotoCache.set(jid, api('/api/wa/photo?jid='+encodeURIComponent(jid)).then(r=>(r&&r.url)||null).catch(()=>null)); } return _waPhotoCache.get(jid); }
+function waInitials(name){ const s=String(name||'').trim(); if(!s) return '?'; const p=s.split(/\s+/); return ((p[0][0]||'')+(p.length>1?(p[p.length-1][0]||''):'')).toUpperCase(); }
+function avatarEl(c, size){ size=size||32; const a=$('<span class="wa-av"></span>'); a.style.width=a.style.height=size+'px'; a.style.lineHeight=size+'px'; a.style.fontSize=Math.round(size*0.4)+'px'; a.textContent=waInitials(c.name); a.title=c.name;
+  if(c.isGroup) a.classList.add('grp');
+  waPhoto(c.id).then(url=>{ if(!url) return; const img=new Image(); img.onload=()=>{ a.textContent=''; a.style.backgroundImage='url("'+url+'")'; a.classList.add('img'); }; img.src=url; });
+  return a; }
+
 async function buildChatPicker(container, preselected, saveLabel, onSave){
   container.innerHTML='';
   const box=$('<div class="card" style="margin-top:8px"></div>'); container.appendChild(box);
@@ -322,12 +334,20 @@ async function buildChatPicker(container, preselected, saveLabel, onSave){
   const chips=$('<div style="margin:8px 0"></div>'); box.appendChild(chips);
   const results=$('<div style="max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px;margin-top:6px"></div>'); box.appendChild(results);
   const save=$('<button class="primary" style="margin-top:10px" disabled></button>'); save.textContent=saveLabel; box.appendChild(save);
-  function renderChips(){ chips.innerHTML = selected.size ? [...selected.values()].map(c=>`<span class="pill">${c.isGroup?'👥':'👤'} ${esc(c.name)}</span>`).join('') : '<span class="muted">none selected yet</span>'; save.disabled = selected.size===0; }
+  function renderChips(){ chips.innerHTML='';
+    if(!selected.size){ chips.appendChild($('<span class="muted">none selected yet</span>')); save.disabled=true; return; }
+    [...selected.values()].forEach(c=>{ const pill=$('<span class="pill" style="display:inline-flex;align-items:center;gap:5px;margin:2px"></span>');
+      pill.appendChild(avatarEl(c,18)); const t=$('<span></span>'); t.textContent=c.name; pill.appendChild(t);
+      if(c.isGroup) pill.appendChild($('<span>👥</span>')); chips.appendChild(pill); });
+    save.disabled=false; }
   async function doSearch(){ let r; try{ r=await api('/api/wa/chats?q='+encodeURIComponent(search.value.trim())); }catch{ r={chats:[]}; }
     results.innerHTML = r.chats.length ? '' : '<span class="muted">No matches (try a name or number; chats appear after they sync).</span>';
-    r.chats.forEach(c=>{ const row=$('<label style="display:block;padding:4px 2px;cursor:pointer"></label>');
-      row.innerHTML=`<input type="checkbox" ${selected.has(c.id)?'checked':''}/> ${c.isGroup?'👥':'👤'} ${esc(c.name)} <span class="muted">${esc(c.id.split('@')[0])}</span>`;
-      row.querySelector('input').onchange=(e)=>{ if(e.target.checked) selected.set(c.id,{id:c.id,name:c.name,isGroup:c.isGroup}); else selected.delete(c.id); renderChips(); };
+    r.chats.forEach(c=>{ const row=$('<label style="display:flex;align-items:center;gap:8px;padding:5px 2px;cursor:pointer"></label>');
+      const cb=$('<input type="checkbox"/>'); cb.checked=selected.has(c.id);
+      const name=$('<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>'); name.textContent=c.name;
+      row.appendChild(cb); row.appendChild(avatarEl(c,32)); row.appendChild(name);
+      if(c.isGroup) row.appendChild($('<span class="pill" title="Group" style="flex:0 0 auto">👥</span>'));
+      cb.onchange=(e)=>{ if(e.target.checked) selected.set(c.id,{id:c.id,name:c.name,isGroup:c.isGroup}); else selected.delete(c.id); renderChips(); };
       results.appendChild(row); }); }
   let t; search.addEventListener('input', ()=>{ clearTimeout(t); t=setTimeout(doSearch, 300); });
   save.onclick=()=> onSave([...selected.values()].map(c=>({id:c.id,name:c.name})), save);

@@ -228,6 +228,11 @@ export class AppState {
     return this.baileys ? this.baileys.listChats(query) : [];
   }
 
+  /** Lazily resolve a linked-account chat's profile photo URL, or null if none/not linked. */
+  async personalChatPhoto(jid: string): Promise<string | null> {
+    return this.baileys ? this.baileys.profilePhoto(jid) : null;
+  }
+
   /** Set an agent's chat allow-list and bind each chat jid to it (inbound for those chats → this agent). */
   bindChatsToAgent(agentId: string, tenantId: string, chats: ChatRef[]): StoredAgent {
     const agent = this.getAgent(agentId, tenantId);

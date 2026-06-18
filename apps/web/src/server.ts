@@ -233,6 +233,17 @@ app.get('/api/wa/chats', wrap(async (req, res) => {
   res.json({ chats: state.listPersonalChats(String(req.query.q ?? '')) });
 }));
 
+app.get('/api/wa/photo', wrap(async (req, res) => {
+  const jid = String(req.query.jid ?? '');
+  if (!jid) {
+    res.status(400).json({ url: null });
+    return;
+  }
+  const url = await state.personalChatPhoto(jid);
+  res.set('Cache-Control', 'private, max-age=300'); // mirror the server-side TTL
+  res.json({ url });
+}));
+
 app.post('/api/agents/:id/suggest', wrap(async (req, res, auth) => {
   const r = await state.suggestImprovements(req.params.id, auth.tenantId);
   if (!r) {
