@@ -52,6 +52,18 @@ const agentSummary = (a: ReturnType<AppState['listAgents']>[number]) => ({
   lastActivityAt: a.lastActivityAt,
 });
 
+const catalogSummary = (e: ReturnType<AppState['listCatalog']>[number]) => ({
+  id: e.id,
+  title: e.title,
+  description: e.description,
+  category: e.category,
+  icon: e.icon ?? null,
+  name: e.spec.agent_name,
+  tone: e.spec.brand_persona.tone,
+  model: e.spec.model_assignment,
+  goal: e.spec.goal,
+});
+
 const app = express();
 
 // Real WhatsApp Cloud API webhook — mounted FIRST so its raw-body parser (needed for the
@@ -175,6 +187,29 @@ app.get('/api/agents/:id', wrap(async (req, res, auth) => {
   res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername, listenChats: a.listenChats });
 }));
 
+// --- Catalog (global, curated; deploy-as-is into the caller's tenant) ---
+app.get('/api/catalog', wrap(async (_req, res) => {
+  res.json({ catalog: state.listCatalog().map(catalogSummary) });
+}));
+
+app.get('/api/catalog/:id', wrap(async (req, res) => {
+  const e = state.getCatalogEntry(req.params.id);
+  if (!e) {
+    res.sendStatus(404);
+    return;
+  }
+  res.json({ ...catalogSummary(e), spec: e.spec });
+}));
+
+app.post('/api/catalog/:id/deploy', wrap(async (req, res, auth) => {
+  if (!state.getCatalogEntry(req.params.id)) {
+    res.sendStatus(404);
+    return;
+  }
+  const a = state.deployFromCatalog(req.params.id, auth.username, auth.tenantId);
+  res.json({ agentId: a.id, phoneNumberId: a.phoneNumberId, status: a.status });
+}));
+
 app.get('/api/whatsapp/status', wrap(async (_req, res) => {
   res.json(state.whatsappStatus());
 }));
@@ -213,6 +248,16 @@ app.post('/api/agents/:id/apply', wrap(async (req, res, auth) => {
   res.json({ id: a.id, version: a.spec.version });
 }));
 
+// Edit an existing agent's chat allow-list.
+app.post('/api/agents/:id/chats', wrap(async (req, res, auth) => {
+  const { chats } = (req.body ?? {}) as { chats?: Array<{ id?: unknown; name?: unknown }> };
+  const list = (Array.isArray(chats) ? chats : [])
+    .filter((c) => c && typeof c.id === 'string' && typeof c.name === 'string')
+    .map((c) => ({ id: String(c.id), name: String(c.name) }));
+  const a = state.editChats(req.params.id, auth.tenantId, list);
+  res.json({ id: a.id, listenChats: a.listenChats });
+}));
+
 app.post('/api/agents/:id/:action', wrap(async (req, res, auth) => {
   const action = req.params.action;
   if (action !== 'pause' && action !== 'resume') {
@@ -242,6 +287,12 @@ app.get('/api/sim/history', wrap(async (req, res, auth) => {
   const agentId = String(req.query.agentId ?? '');
   const from = String(req.query.from ?? 'sim-user');
   res.json({ history: await state.history(agentId, auth.tenantId, from) });
+}));
+
+// --- Live activity log (inbound → routed → reply), tenant-scoped ---
+app.get('/api/activity', wrap(async (req, res, auth) => {
+  const agentId = req.query.agentId ? String(req.query.agentId) : undefined;
+  res.json({ events: state.recentActivity(auth.tenantId, agentId) });
 }));
 
 // --- Static SPA ---

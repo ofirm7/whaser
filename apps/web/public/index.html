@@ -73,8 +73,10 @@ function render(){
   const wrap = $('<div class="wrap"></div>');
   root.appendChild(wrap);
   if (view === 'agents') AgentsView(wrap);
+  else if (view === 'catalog') CatalogView(wrap);
   else if (view === 'create') CreateView(wrap);
   else if (view === 'whatsapp') WhatsAppView(wrap);
+  else if (view === 'activity') ActivityView(wrap);
   else if (view && view.startsWith('agent:')) AgentDetailView(wrap, view.slice(6));
 }
 
@@ -83,8 +85,10 @@ function Header(){
   h.innerHTML = `<span class="logo">Whaser</span>
     <nav>
       <button class="nav ${view==='agents'?'active':''}" data-go="agents">Agents</button>
+      <button class="nav ${view==='catalog'?'active':''}" data-go="catalog">Catalog</button>
       <button class="nav ${view==='create'?'active':''}" data-go="create">+ Create agent</button>
       <button class="nav ${view==='whatsapp'?'active':''}" data-go="whatsapp">WhatsApp</button>
+      <button class="nav ${view==='activity'?'active':''}" data-go="activity">Activity</button>
     </nav>
     <span class="spacer"></span>
     <span class="badge ${mode==='claude'?'live':'paused'}" title="${mode==='claude'?'Live Claude (ANTHROPIC_API_KEY set)':'Demo mode — set ANTHROPIC_API_KEY for real Claude'}">${mode==='claude'?'● Claude':'● Demo'}</span>
@@ -135,6 +139,36 @@ async function AgentsView(wrap){
   } catch(err){ wrap.appendChild($(`<div class="card err">${esc(err.message)}</div>`)); }
 }
 
+async function CatalogView(wrap){
+  wrap.appendChild($('<h1>Catalog</h1>'));
+  wrap.appendChild($('<div class="muted" style="margin-bottom:14px">Curated, ready-to-deploy agents — pick one to launch it on a number instantly.</div>'));
+  try {
+    const { catalog } = await api('/api/catalog');
+    if (!catalog.length){ wrap.appendChild($('<div class="card muted">The catalog is empty.</div>')); return; }
+    const grid = $('<div class="grid"></div>');
+    for (const c of catalog){
+      const card = $('<div class="card"></div>');
+      card.innerHTML = `<div class="row" style="justify-content:space-between"><b>${c.icon?esc(c.icon)+' ':''}${esc(c.title)}</b>
+        <span class="pill">${esc(c.category)}</span></div>
+        <div class="muted" style="margin:6px 0">${esc(c.description)}</div>
+        <div><span class="pill">${esc(c.tone)}</span><span class="pill">${esc(c.model)}</span></div>
+        <div class="row" style="margin-top:12px"><button class="primary" data-act="deploy">Deploy</button>
+        <button class="ghost" data-act="preview">Preview spec</button></div>
+        <pre data-spec style="display:none;margin-top:10px"></pre>`;
+      const deployBtn = card.querySelector('[data-act=deploy]');
+      deployBtn.onclick = async ()=>{ deployBtn.disabled=true;
+        try{ const r = await api('/api/catalog/'+encodeURIComponent(c.id)+'/deploy','POST'); view='agent:'+r.agentId; render(); }
+        catch(err){ deployBtn.disabled=false; alert(err.message); } };
+      const prev = card.querySelector('[data-act=preview]'), pre = card.querySelector('[data-spec]');
+      prev.onclick = async ()=>{ if (pre.style.display!=='none'){ pre.style.display='none'; return; }
+        if (!pre.textContent){ try{ const d = await api('/api/catalog/'+encodeURIComponent(c.id)); pre.textContent = JSON.stringify(d.spec,null,2); }catch(err){ pre.textContent = err.message; } }
+        pre.style.display='block'; };
+      grid.appendChild(card);
+    }
+    wrap.appendChild(grid);
+  } catch(err){ wrap.appendChild($(`<div class="card err">${esc(err.message)}</div>`)); }
+}
+
 async function AgentDetailView(wrap, id){
   wrap.appendChild($('<button class="ghost" id="back">← Agents</button>'));
   wrap.querySelector('#back').onclick=()=>{ view='agents'; render(); };
@@ -156,10 +190,18 @@ async function AgentDetailView(wrap, id){
     <div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?('<b>Listening on:</b> '+a.listenChats.map(c=>`<span class="pill">💬 ${esc(c.name)}</span>`).join('')):'<span class="muted"><b>Listening on:</b> no chats selected (chosen during creation)</span>'}</div>
     <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?'Pause':'Resume'}</button>
     <button class="ghost" id="showspec">View AgentSpec</button>
+    <button id="editchats">✏️ Edit chats</button>
     ${whatsapp.configured ? `<button id="connectwa" class="${whatsapp.boundAgentId===a.id?'':'primary'}">${whatsapp.boundAgentId===a.id?'✓ Cloud API connected':'📲 Connect Cloud API ('+esc(whatsapp.phoneNumberId)+')'}</button>` : ''}</div>
-    <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>`;
+    <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>
+    <div id="chatedit"></div>`;
   head.querySelector('#toggle').onclick = async ()=>{ await api('/api/agents/'+id+'/'+(a.status==='live'?'pause':'resume'),'POST'); render(); };
   head.querySelector('#showspec').onclick = ()=>{ const p=head.querySelector('#spec'); p.style.display = p.style.display==='none'?'block':'none'; };
+  head.querySelector('#editchats').onclick = ()=>{ const c=head.querySelector('#chatedit');
+    if (c.dataset.open){ c.innerHTML=''; delete c.dataset.open; return; }
+    c.dataset.open='1';
+    buildChatPicker(c, a.listenChats||[], 'Save chats', async (chats, btn)=>{ btn.disabled=true;
+      try{ await api('/api/agents/'+id+'/chats','POST',{ chats }); render(); }
+      catch(e){ alert(e.message); btn.disabled=false; } }); };
   const cw = head.querySelector('#connectwa');
   if (cw && whatsapp.boundAgentId!==a.id) cw.onclick = async ()=>{ cw.disabled=true;
     try{ const r=await api('/api/agents/'+id+'/connect-whatsapp','POST'); whatsapp.boundAgentId=r.boundAgentId; render(); }
@@ -236,6 +278,62 @@ async function WhatsAppView(wrap){
   waPollTimer = setInterval(refresh, 2500);
 }
 
+async function ActivityView(wrap){
+  wrap.appendChild($('<h1>Activity</h1>'));
+  wrap.appendChild($('<div class="muted" style="margin-bottom:14px">Live feed of inbound → routing → reply across your tenant\'s agents (simulator 🧪 + WhatsApp 📱). Newest first, refreshes automatically.</div>'));
+  const card=$('<div class="card"></div>'); wrap.appendChild(card);
+  async function refresh(){
+    let r; try{ r=await api('/api/activity'); }catch(e){ card.innerHTML='<span class="err">'+esc(e.message)+'</span>'; return; }
+    if(!r.events.length){ card.innerHTML='<span class="muted">No activity yet. Use an agent\'s simulator, or message a linked chat.</span>'; return; }
+    card.innerHTML = r.events.map(e=>{
+      const when=new Date(e.ts).toLocaleTimeString();
+      const ch = e.channel==='whatsapp'?'📱':'🧪';
+      const route = e.blocked ? '<span class="err">⛔ '+esc(e.blocked)+'</span>' : (e.routedTo && e.routedTo!=='default' ? '🧭 '+esc(e.routedTo) : '<span class="muted">default</span>');
+      const reply = e.reply ? esc(e.reply.slice(0,200)) : '<span class="muted">(no reply)</span>';
+      return `<div style="border-bottom:1px solid var(--line);padding:8px 0">
+        <div class="muted" style="font-size:12px">${when} · ${ch} <b>${esc(e.agentName)}</b> · from ${esc(e.from)}${e.chatId?(' · '+esc(String(e.chatId).split('@')[0])):''} · ${route}</div>
+        <div style="margin-top:2px">“${esc(e.text.slice(0,200))}”</div>
+        <div style="margin-top:2px">↳ ${reply}</div></div>`;
+    }).join('');
+  }
+  await refresh();
+  waPollTimer = setInterval(refresh, 3000);
+}
+
+// Reusable chat allow-list picker (used by the wizard and by "Edit chats"). Renders into
+// `container`; calls onSave(chats, saveBtn) when the user confirms. Falls back to a link prompt
+// when WhatsApp isn't connected.
+async function buildChatPicker(container, preselected, saveLabel, onSave){
+  container.innerHTML='';
+  const box=$('<div class="card" style="margin-top:8px"></div>'); container.appendChild(box);
+  let st; try{ st=await api('/api/wa/status'); }catch{ st={status:'disconnected'}; }
+  if (st.status!=='connected'){
+    box.innerHTML='<div class="muted">Your WhatsApp isn\'t linked yet — link it to choose chats.</div>';
+    const lb=$('<button class="primary" style="margin-top:8px">Link my WhatsApp</button>');
+    lb.onclick=async()=>{ lb.disabled=true; try{ await api('/api/wa/link','POST'); }catch{}
+      const poll=setInterval(async()=>{ let s; try{ s=await api('/api/wa/status'); }catch{ return; }
+        if(s.status==='qr'&&s.qrDataUrl){ box.innerHTML='<div>Scan in WhatsApp → Settings → Linked devices → Link a device:</div><img alt="QR" src="'+s.qrDataUrl+'" style="width:240px;height:240px;background:#fff;border-radius:8px;margin-top:8px"/>'; }
+        if(s.status==='connected'){ clearInterval(poll); buildChatPicker(container, preselected, saveLabel, onSave); } }, 2500); };
+    box.appendChild(lb); return;
+  }
+  const selected=new Map((preselected||[]).map(c=>[c.id,{id:c.id,name:c.name,isGroup:String(c.id).endsWith('@g.us')}]));
+  box.innerHTML='<b>Which chats should this agent answer?</b><div class="muted" style="margin:4px 0 8px">Search your contacts and groups by name or number, then tick the ones to listen on.</div>';
+  const search=$('<input placeholder="Search chats/contacts…"/>'); box.appendChild(search);
+  const chips=$('<div style="margin:8px 0"></div>'); box.appendChild(chips);
+  const results=$('<div style="max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px;margin-top:6px"></div>'); box.appendChild(results);
+  const save=$('<button class="primary" style="margin-top:10px" disabled></button>'); save.textContent=saveLabel; box.appendChild(save);
+  function renderChips(){ chips.innerHTML = selected.size ? [...selected.values()].map(c=>`<span class="pill">${c.isGroup?'👥':'👤'} ${esc(c.name)}</span>`).join('') : '<span class="muted">none selected yet</span>'; save.disabled = selected.size===0; }
+  async function doSearch(){ let r; try{ r=await api('/api/wa/chats?q='+encodeURIComponent(search.value.trim())); }catch{ r={chats:[]}; }
+    results.innerHTML = r.chats.length ? '' : '<span class="muted">No matches (try a name or number; chats appear after they sync).</span>';
+    r.chats.forEach(c=>{ const row=$('<label style="display:block;padding:4px 2px;cursor:pointer"></label>');
+      row.innerHTML=`<input type="checkbox" ${selected.has(c.id)?'checked':''}/> ${c.isGroup?'👥':'👤'} ${esc(c.name)} <span class="muted">${esc(c.id.split('@')[0])}</span>`;
+      row.querySelector('input').onchange=(e)=>{ if(e.target.checked) selected.set(c.id,{id:c.id,name:c.name,isGroup:c.isGroup}); else selected.delete(c.id); renderChips(); };
+      results.appendChild(row); }); }
+  let t; search.addEventListener('input', ()=>{ clearTimeout(t); t=setTimeout(doSearch, 300); });
+  save.onclick=()=> onSave([...selected.values()].map(c=>({id:c.id,name:c.name})), save);
+  renderChips(); doSearch();
+}
+
 async function CreateView(wrap){
   wrap.appendChild($('<h1>Create a new agent</h1>'));
   wrap.appendChild($('<div class="muted" style="margin-bottom:12px">Answer a few questions — Whaser assembles a precise, validated agent spec. (This is Whaser\'s differentiator: a conversation, not a flow canvas.)</div>'));
@@ -264,37 +362,12 @@ async function CreateView(wrap){
     const r = await api('/api/wizard/answer','POST',{ sessionId, text }); handlePrompt(r.prompt);
   };
 
-  async function renderChatPicker(){
-    actions.innerHTML='';
-    const box=$('<div class="card" style="margin-top:8px"></div>'); actions.appendChild(box);
-    let st; try{ st=await api('/api/wa/status'); }catch{ st={status:'disconnected'}; }
-    if (st.status!=='connected'){
-      box.innerHTML='<div class="muted">Your WhatsApp isn\'t linked yet — link it to choose chats.</div>';
-      const lb=$('<button class="primary" style="margin-top:8px">Link my WhatsApp</button>');
-      lb.onclick=async()=>{ lb.disabled=true; try{ await api('/api/wa/link','POST'); }catch{}
-        const poll=setInterval(async()=>{ let s; try{ s=await api('/api/wa/status'); }catch{ return; }
-          if(s.status==='qr'&&s.qrDataUrl){ box.innerHTML='<div>Scan in WhatsApp → Settings → Linked devices → Link a device:</div><img alt="QR" src="'+s.qrDataUrl+'" style="width:240px;height:240px;background:#fff;border-radius:8px;margin-top:8px"/>'; }
-          if(s.status==='connected'){ clearInterval(poll); renderChatPicker(); } }, 2500); };
-      box.appendChild(lb); return;
-    }
-    const selected=new Map();
-    box.innerHTML='<b>Which chats should this agent answer?</b><div class="muted" style="margin:4px 0 8px">Search your contacts and groups by name or number, then tick the ones to listen on.</div>';
-    const search=$('<input placeholder="Search chats/contacts…"/>'); box.appendChild(search);
-    const chips=$('<div style="margin:8px 0"></div>'); box.appendChild(chips);
-    const results=$('<div style="max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px;margin-top:6px"></div>'); box.appendChild(results);
-    const cont=$('<button class="primary" style="margin-top:10px" disabled>Continue</button>'); box.appendChild(cont);
-    function renderChips(){ chips.innerHTML = selected.size ? [...selected.values()].map(c=>`<span class="pill">${c.isGroup?'👥':'👤'} ${esc(c.name)}</span>`).join('') : '<span class="muted">none selected yet</span>'; cont.disabled = selected.size===0; }
-    async function doSearch(){ let r; try{ r=await api('/api/wa/chats?q='+encodeURIComponent(search.value.trim())); }catch{ r={chats:[]}; }
-      results.innerHTML = r.chats.length ? '' : '<span class="muted">No matches (try a name or number; chats appear after they sync).</span>';
-      r.chats.forEach(c=>{ const row=$('<label style="display:block;padding:4px 2px;cursor:pointer"></label>');
-        row.innerHTML=`<input type="checkbox" ${selected.has(c.id)?'checked':''}/> ${c.isGroup?'👥':'👤'} ${esc(c.name)} <span class="muted">${esc(c.id.split('@')[0])}</span>`;
-        row.querySelector('input').onchange=(e)=>{ if(e.target.checked) selected.set(c.id,{id:c.id,name:c.name,isGroup:c.isGroup}); else selected.delete(c.id); renderChips(); };
-        results.appendChild(row); }); }
-    let t; search.addEventListener('input', ()=>{ clearTimeout(t); t=setTimeout(doSearch, 300); });
-    cont.onclick=async()=>{ cont.disabled=true; addBub('me','Listen on: '+[...selected.values()].map(c=>c.name).join(', '));
-      const r=await api('/api/wizard/select-chats','POST',{ sessionId, chats:[...selected.values()].map(c=>({id:c.id,name:c.name})) });
-      actions.innerHTML=''; handlePrompt(r.prompt); };
-    renderChips(); doSearch();
+  function renderChatPicker(){
+    buildChatPicker(actions, [], 'Continue', async (chats)=>{
+      addBub('me','Listen on: '+chats.map(c=>c.name).join(', '));
+      const r=await api('/api/wizard/select-chats','POST',{ sessionId, chats });
+      actions.innerHTML=''; handlePrompt(r.prompt);
+    });
   }
   sendBtn.onclick = ()=> ask().catch(e=>addBub('bot','⚠ '+e.message));
   input.addEventListener('keydown', e=>{ if(e.key==='Enter') sendBtn.onclick(); });

@@ -57,3 +57,7 @@ deploy/data/
 apps/web/.wa-auth/
 .wa-auth/
 apps/web/.wa-auth
+
+# Persisted agents (POC file store) — never commit
+apps/web/.data/
+.data/

@@ -15,6 +15,9 @@ import { StubLlmClient, StubWorkflowLlm, StubTuner } from './stubs';
 import { makeAnthropicLike, AnthropicWorkflowLlm } from './anthropic';
 import { WorkflowAgentRuntime } from './workflowRuntime';
 import { BaileysChannel } from './baileys';
+import { loadAgents, saveAgents } from './persistence';
+import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 export type RuntimeModeName = 'claude' | 'stub';
 
@@ -28,6 +31,21 @@ export interface ChatRef {
   name: string;
 }
 
+/** One inbound→routed→reply event, for the live activity log. */
+export interface ActivityEvent {
+  ts: number;
+  tenantId: string;
+  agentId: string;
+  agentName: string;
+  channel: 'sim' | 'whatsapp';
+  chatId: string | null;
+  from: string;
+  text: string;
+  routedTo: string | null;
+  reply: string | null;
+  blocked: string | null;
+}
+
 export interface StoredAgent {
   id: string;
   tenantId: string;
@@ -39,6 +57,16 @@ export interface StoredAgent {
   listenChats: ChatRef[];
   createdAt: number;
   lastActivityAt: number | null;
+}
+
+/** A curated, ready-to-deploy agent in the global catalog (loaded from apps/web/catalog/*.json). */
+export interface CatalogEntry {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  icon?: string;
+  spec: AgentSpec;
 }
 
 export interface WizardSession {
@@ -55,7 +83,10 @@ export class AppState {
   readonly mode: RuntimeModeName;
   readonly builder: AgentBuilder;
   private readonly agents = new Map<string, StoredAgent>();
+  private readonly catalog = new Map<string, CatalogEntry>();
   private readonly sessions = new Map<string, WizardSession>();
+  /** Monotonic source for SIM phone numbers — never reuses a number even if an agent is removed. */
+  private simSeq = 0;
   private readonly resolver = new InMemoryAgentResolver();
   private readonly conversations = new InMemoryConversationStore();
   private readonly breaker = new CircuitBreaker({ perSenderPerMinute: 20, maxInboundChars: 4000, tenantDailyTokenBudget: 2_000_000 });
@@ -64,6 +95,7 @@ export class AppState {
   private readonly handler: InboundHandler;
   private readonly lastBlock = new Map<string, string>();
   private readonly transcripts = new Map<string, TranscriptTurn[]>();
+  private readonly activity: ActivityEvent[] = [];
   private seq = 0;
 
   constructor() {
@@ -91,6 +123,15 @@ export class AppState {
       onBlocked: (reason, msg) => this.lastBlock.set(msg.waMessageId, reason),
     });
 
+    // Persisted agents survive restarts: load them + re-bind their SIM number and chat allow-list.
+    for (const a of loadAgents()) {
+      this.agents.set(a.id, a);
+      this.resolver.bind(a.phoneNumberId, { agentId: a.id, tenantId: a.tenantId });
+      for (const c of a.listenChats) this.resolver.bind(c.id, { agentId: a.id, tenantId: a.tenantId });
+      const m = a.phoneNumberId.match(/^SIM-(\d+)$/);
+      if (m) this.simSeq = Math.max(this.simSeq, Number(m[1]) - 1000 + 1);
+    }
+
     // Real WhatsApp Cloud API: enabled only when all four env vars are present.
     const env = process.env;
     if (env.WHATSAPP_VERIFY_TOKEN && env.WHATSAPP_APP_SECRET && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID) {
@@ -109,6 +150,9 @@ export class AppState {
     // WhatsApp connected by default: auto-start the personal link (reconnects via .wa-auth
     // after the one-time QR scan). Fire-and-forget; errors are logged inside the channel.
     void this.startPersonalLink().catch((e) => console.error('[baileys] auto-start', e));
+
+    // Load the global agents-catalog from committed seed files (once, at startup).
+    this.loadCatalog();
   }
 
   // --- Real WhatsApp wiring (assigned in the constructor when env is present) ---
@@ -148,6 +192,8 @@ export class AppState {
     const waMessageId = `ch-${++this.seq}`;
     const msg: InboundMessage = { waMessageId, from, phoneNumberId, type: 'text', text, timestamp: this.now() };
     const out = await this.handler(msg);
+    const blocked = this.lastBlock.get(waMessageId) ?? null;
+    const routedTo = out ? this.runtime.lastRoutedTo : null;
     const route = await this.resolver.resolve(phoneNumberId);
     if (route) {
       const t = this.transcripts.get(route.agentId) ?? [];
@@ -156,8 +202,9 @@ export class AppState {
       this.transcripts.set(route.agentId, t.slice(-40));
       const a = this.agents.get(route.agentId);
       if (a) a.lastActivityAt = this.now();
+      this.logActivity({ ts: this.now(), tenantId: route.tenantId, agentId: route.agentId, agentName: a?.spec.agent_name ?? route.agentId, channel: 'whatsapp', chatId: phoneNumberId, from, text, routedTo, reply: out?.text ?? null, blocked });
     }
-    return { reply: out?.text ?? null, routedTo: out ? this.runtime.lastRoutedTo : null, blocked: this.lastBlock.get(waMessageId) ?? null };
+    return { reply: out?.text ?? null, routedTo, blocked };
   }
 
   // --- QR-linked personal WhatsApp (Baileys; POC only) ---
@@ -187,6 +234,19 @@ export class AppState {
     if (!agent) throw new Error('agent not found');
     agent.listenChats = chats;
     for (const c of chats) this.resolver.bind(c.id, { agentId: agent.id, tenantId });
+    this.persist();
+    return agent;
+  }
+
+  /** Replace an agent's chat allow-list after creation: unbind removed chats, bind added, persist. */
+  editChats(agentId: string, tenantId: string, chats: ChatRef[]): StoredAgent {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    const newIds = new Set(chats.map((c) => c.id));
+    for (const c of agent.listenChats) if (!newIds.has(c.id)) this.resolver.unbind(c.id);
+    agent.listenChats = chats;
+    for (const c of chats) this.resolver.bind(c.id, { agentId: agent.id, tenantId });
+    this.persist();
     return agent;
   }
 
@@ -197,6 +257,25 @@ export class AppState {
 
   private now(): number {
     return Date.now();
+  }
+
+  private persist(): void {
+    saveAgents([...this.agents.values()]);
+  }
+
+  private logActivity(e: ActivityEvent): void {
+    this.activity.push(e);
+    if (this.activity.length > 300) this.activity.splice(0, this.activity.length - 300);
+  }
+
+  /** Recent inbound→routed→reply events for a tenant (optionally one agent), newest first. */
+  recentActivity(tenantId: string, agentId?: string, limit = 100): ActivityEvent[] {
+    return this.activity.filter((e) => e.tenantId === tenantId && (!agentId || e.agentId === agentId)).slice(-limit).reverse();
+  }
+
+  /** Mint the next simulator phone_number_id. Monotonic so two agents never collide on a number. */
+  private nextSimNumber(): string {
+    return `SIM-${1000 + this.simSeq++}`;
   }
 
   // --- Wizard ---
@@ -230,13 +309,72 @@ export class AppState {
       ownerUsername: session.ownerUsername,
       spec,
       status: 'live',
-      phoneNumberId: `SIM-${1000 + this.agents.size}`,
+      phoneNumberId: this.nextSimNumber(),
       listenChats: [],
       createdAt: this.now(),
       lastActivityAt: null,
     };
     this.agents.set(agent.id, agent);
     this.resolver.bind(agent.phoneNumberId, { agentId: agent.id, tenantId: agent.tenantId });
+    this.persist();
+    return agent;
+  }
+
+  // --- Catalog (global, curated, deploy-as-is) ---
+
+  /** Load and validate every catalog seed file at apps/web/catalog/*.json. Invalid entries are skipped. */
+  private loadCatalog(): void {
+    const dir = fileURLToPath(new URL('../catalog', import.meta.url));
+    if (!existsSync(dir)) return;
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.json')).sort()) {
+      const stem = file.replace(/\.json$/, '');
+      try {
+        const entry = JSON.parse(readFileSync(`${dir}/${file}`, 'utf8')) as CatalogEntry;
+        const meta = ['id', 'title', 'description', 'category'] as const;
+        for (const k of meta) {
+          if (typeof entry[k] !== 'string' || !entry[k].trim()) throw new Error(`missing/empty "${k}"`);
+        }
+        if (entry.id !== stem) throw new Error(`id "${entry.id}" must equal filename stem "${stem}"`);
+        if (this.catalog.has(entry.id)) throw new Error(`duplicate catalog id "${entry.id}"`);
+        const schema = validateAgentSpec(entry.spec);
+        if (!schema.valid) throw new Error(`invalid spec: ${schema.errors.join('; ')}`);
+        const issues = checkConsistency(entry.spec);
+        if (issues.length) throw new Error(`inconsistent spec: ${issues.map((i) => i.message).join('; ')}`);
+        this.catalog.set(entry.id, entry);
+      } catch (e) {
+        console.warn(`[catalog] skipping ${file}:`, e instanceof Error ? e.message : e);
+      }
+    }
+  }
+
+  listCatalog(): CatalogEntry[] {
+    return [...this.catalog.values()].sort((a, b) => (a.category + a.title).localeCompare(b.category + b.title));
+  }
+
+  getCatalogEntry(id: string): CatalogEntry | undefined {
+    return this.catalog.get(id);
+  }
+
+  /** Deploy a catalog entry as-is into a tenant: a fresh live agent on its own SIM number. */
+  deployFromCatalog(catalogId: string, ownerUsername: string, tenantId: string): StoredAgent {
+    const entry = this.catalog.get(catalogId);
+    if (!entry) throw new Error('catalog entry not found');
+    // Deep-clone so deploys never share/mutate the catalog master (self-tuning edits agent.spec in place).
+    const spec = JSON.parse(JSON.stringify(entry.spec)) as AgentSpec;
+    const agent: StoredAgent = {
+      id: this.id('agent'),
+      tenantId,
+      ownerUsername,
+      spec,
+      status: 'live',
+      phoneNumberId: this.nextSimNumber(),
+      listenChats: [],
+      createdAt: this.now(),
+      lastActivityAt: null,
+    };
+    this.agents.set(agent.id, agent);
+    this.resolver.bind(agent.phoneNumberId, { agentId: agent.id, tenantId });
+    this.persist();
     return agent;
   }
 
@@ -244,6 +382,7 @@ export class AppState {
     const a = this.getAgent(id, tenantId);
     if (!a) return undefined;
     a.status = status;
+    this.persist();
     return a;
   }
 
@@ -257,12 +396,14 @@ export class AppState {
     const out = await this.handler(msg);
     agent.lastActivityAt = this.now();
     const blocked = this.lastBlock.get(waMessageId) ?? null;
+    const routedTo = out ? this.runtime.lastRoutedTo : null;
     // Record a flat per-agent transcript for self-tuning (capped).
     const t = this.transcripts.get(agentId) ?? [];
     t.push({ role: 'user', content: text });
     if (out?.text) t.push({ role: 'assistant', content: out.text });
     this.transcripts.set(agentId, t.slice(-40));
-    return { reply: out?.text ?? null, blocked, status: agent.status, routedTo: out ? this.runtime.lastRoutedTo : null };
+    this.logActivity({ ts: this.now(), tenantId, agentId, agentName: agent.spec.agent_name, channel: 'sim', chatId: null, from, text, routedTo, reply: out?.text ?? null, blocked });
+    return { reply: out?.text ?? null, blocked, status: agent.status, routedTo };
   }
 
   // --- Self-improvement (spec self-tuning from transcripts) ---
@@ -281,6 +422,7 @@ export class AppState {
     const issues = checkConsistency(next);
     if (issues.length) throw new Error(`improved spec inconsistent: ${issues.map((i) => i.message).join('; ')}`);
     agent.spec = next;
+    this.persist();
     return agent;
   }
 
