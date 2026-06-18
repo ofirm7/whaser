@@ -96,7 +96,9 @@ export class BaileysChannel {
   /** Search known chats/contacts (individuals + groups), most-recent first; capped at `limit`. */
   listChats(query = '', limit = 100): ChatEntry[] {
     const q = query.trim().toLowerCase();
-    const all = [...this.chats.values()].filter((c) => !q || c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
+    // Match the name or the phone-number part only — NOT the full jid, whose "@s.whatsapp.net" /
+    // "@g.us" suffix contains common letters (a, s, t, w, h, p, n, e, g, u) and matched everything.
+    const all = [...this.chats.values()].filter((c) => !q || c.name.toLowerCase().includes(q) || this.numberOf(c.id).includes(q));
     const junk = (n: string) => /^[\s.,_·\-–—:;'"!?()]+$/.test(n); // name is only punctuation (e.g. "..", "...")
     // recency desc; then real names before punctuation-only/number-only; then alphabetical.
     all.sort((a, b) =>

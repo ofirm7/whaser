@@ -337,14 +337,14 @@ async function buildChatPicker(container, preselected, saveLabel, onSave){
   function renderChips(){ chips.innerHTML='';
     if(!selected.size){ chips.appendChild($('<span class="muted">none selected yet</span>')); save.disabled=true; return; }
     [...selected.values()].forEach(c=>{ const pill=$('<span class="pill" style="display:inline-flex;align-items:center;gap:5px;margin:2px"></span>');
-      pill.appendChild(avatarEl(c,18)); const t=$('<span></span>'); t.textContent=c.name; pill.appendChild(t);
+      pill.appendChild(avatarEl(c,18)); const t=$('<span dir="auto"></span>'); t.textContent=c.name; pill.appendChild(t);
       if(c.isGroup) pill.appendChild($('<span>👥</span>')); chips.appendChild(pill); });
     save.disabled=false; }
   async function doSearch(){ let r; try{ r=await api('/api/wa/chats?q='+encodeURIComponent(search.value.trim())); }catch{ r={chats:[]}; }
     results.innerHTML = r.chats.length ? '' : '<span class="muted">No matches (try a name or number; chats appear after they sync).</span>';
     r.chats.forEach(c=>{ const row=$('<label style="display:flex;align-items:center;gap:8px;padding:5px 2px;cursor:pointer"></label>');
       const cb=$('<input type="checkbox"/>'); cb.checked=selected.has(c.id);
-      const name=$('<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>'); name.textContent=c.name;
+      const name=$('<span dir="auto" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>'); name.textContent=c.name;
       row.appendChild(cb); row.appendChild(avatarEl(c,32)); row.appendChild(name);
       if(c.isGroup) row.appendChild($('<span class="pill" title="Group" style="flex:0 0 auto">👥</span>'));
       cb.onchange=(e)=>{ if(e.target.checked) selected.set(c.id,{id:c.id,name:c.name,isGroup:c.isGroup}); else selected.delete(c.id); renderChips(); };
