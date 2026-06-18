@@ -308,8 +308,12 @@ app.get('/api/activity', wrap(async (req, res, auth) => {
 
 // --- Static SPA ---
 const publicDir = fileURLToPath(new URL('../public', import.meta.url));
-app.use(express.static(publicDir));
-app.get('*', (_req: Request, res: Response) => res.sendFile(`${publicDir}/index.html`));
+// no-cache on the SPA so a redeploy/restart always serves the latest JS (avoids stale clients).
+app.use(express.static(publicDir, { etag: false, setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
+app.get('*', (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(`${publicDir}/index.html`);
+});
 
 const port = Number(process.env.PORT ?? 8080);
 app.listen(port, '0.0.0.0', () => {
