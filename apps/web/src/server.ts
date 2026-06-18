@@ -159,6 +159,21 @@ app.post('/api/agents/:id/connect-whatsapp', wrap(async (req, res, auth) => {
   res.json({ id: a.id, phoneNumberId: a.phoneNumberId, boundAgentId: a.id });
 }));
 
+// --- QR-linked personal WhatsApp (POC) ---
+app.post('/api/wa/link', wrap(async (_req, res) => {
+  await state.startPersonalLink();
+  res.json(state.personalLinkStatus());
+}));
+
+app.get('/api/wa/status', wrap(async (_req, res) => {
+  res.json(state.personalLinkStatus());
+}));
+
+app.post('/api/agents/:id/connect-personal', wrap(async (req, res, auth) => {
+  const a = state.bindPersonalNumber(req.params.id, auth.tenantId);
+  res.json({ id: a.id, boundAgentId: a.id });
+}));
+
 app.post('/api/agents/:id/suggest', wrap(async (req, res, auth) => {
   const r = await state.suggestImprovements(req.params.id, auth.tenantId);
   if (!r) {

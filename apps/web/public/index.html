@@ -52,6 +52,7 @@ let token = localStorage.getItem('whaser_token');
 let user = JSON.parse(localStorage.getItem('whaser_user') || 'null');
 let mode = 'stub';
 let whatsapp = { configured:false, phoneNumberId:null, boundAgentId:null };
+let waPollTimer = null;
 let view = 'agents';
 
 async function api(path, method='GET', body){
@@ -64,6 +65,7 @@ function logout(){ token=null; user=null; localStorage.removeItem('whaser_token'
 function esc(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
 function render(){
+  if (waPollTimer){ clearInterval(waPollTimer); waPollTimer=null; }
   const root = document.getElementById('root');
   root.innerHTML = '';
   if (!token || !user){ root.appendChild(LoginView()); return; }
@@ -72,6 +74,7 @@ function render(){
   root.appendChild(wrap);
   if (view === 'agents') AgentsView(wrap);
   else if (view === 'create') CreateView(wrap);
+  else if (view === 'whatsapp') WhatsAppView(wrap);
   else if (view && view.startsWith('agent:')) AgentDetailView(wrap, view.slice(6));
 }
 
@@ -81,6 +84,7 @@ function Header(){
     <nav>
       <button class="nav ${view==='agents'?'active':''}" data-go="agents">Agents</button>
       <button class="nav ${view==='create'?'active':''}" data-go="create">+ Create agent</button>
+      <button class="nav ${view==='whatsapp'?'active':''}" data-go="whatsapp">WhatsApp</button>
     </nav>
     <span class="spacer"></span>
     <span class="badge ${mode==='claude'?'live':'paused'}" title="${mode==='claude'?'Live Claude (ANTHROPIC_API_KEY set)':'Demo mode — set ANTHROPIC_API_KEY for real Claude'}">${mode==='claude'?'● Claude':'● Demo'}</span>
@@ -151,7 +155,8 @@ async function AgentDetailView(wrap, id){
       : `<div style="margin-top:10px muted"><b>Workflow:</b> <span class="muted">single agent</span></div>`}
     <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?'Pause':'Resume'}</button>
     <button class="ghost" id="showspec">View AgentSpec</button>
-    ${whatsapp.configured ? `<button id="connectwa" class="${whatsapp.boundAgentId===a.id?'':'primary'}">${whatsapp.boundAgentId===a.id?'✓ WhatsApp connected':'📲 Connect real WhatsApp ('+esc(whatsapp.phoneNumberId)+')'}</button>` : ''}</div>
+    <button id="connectpersonal">📱 Connect to my WhatsApp</button>
+    ${whatsapp.configured ? `<button id="connectwa" class="${whatsapp.boundAgentId===a.id?'':'primary'}">${whatsapp.boundAgentId===a.id?'✓ Cloud API connected':'📲 Connect Cloud API ('+esc(whatsapp.phoneNumberId)+')'}</button>` : ''}</div>
     <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>`;
   head.querySelector('#toggle').onclick = async ()=>{ await api('/api/agents/'+id+'/'+(a.status==='live'?'pause':'resume'),'POST'); render(); };
   head.querySelector('#showspec').onclick = ()=>{ const p=head.querySelector('#spec'); p.style.display = p.style.display==='none'?'block':'none'; };
@@ -159,6 +164,10 @@ async function AgentDetailView(wrap, id){
   if (cw && whatsapp.boundAgentId!==a.id) cw.onclick = async ()=>{ cw.disabled=true;
     try{ const r=await api('/api/agents/'+id+'/connect-whatsapp','POST'); whatsapp.boundAgentId=r.boundAgentId; render(); }
     catch(e){ alert(e.message); cw.disabled=false; } };
+  const cp = head.querySelector('#connectpersonal');
+  if (cp) cp.onclick = async ()=>{ cp.disabled=true;
+    try{ await api('/api/agents/'+id+'/connect-personal','POST'); cp.textContent='✓ Connected to my WhatsApp'; }
+    catch(e){ alert(e.message); cp.disabled=false; } };
   wrap.appendChild(head);
 
   // WhatsApp simulator
@@ -200,6 +209,35 @@ async function AgentDetailView(wrap, id){
         setTimeout(()=>render(),800); };
       box.appendChild(apply);
     }catch(err){ box.innerHTML='<span class="err">'+esc(err.message)+'</span>'; } };
+}
+
+async function WhatsAppView(wrap){
+  wrap.appendChild($('<h1>WhatsApp — link your number (QR)</h1>'));
+  wrap.appendChild($('<div class="card" style="border-color:#8a6d3b">⚠️ <b>POC only.</b> This links your <i>personal</i> WhatsApp via the unofficial WhatsApp-Web protocol — against WhatsApp\'s ToS, with a real risk of the number being banned. Prefer a spare SIM. The Cloud API path is the production-safe option.</div>'));
+  const card = $('<div class="card"></div>');
+  wrap.appendChild(card);
+  async function refresh(){
+    let s; try { s = await api('/api/wa/status'); } catch(e){ card.innerHTML = '<span class="err">'+esc(e.message)+'</span>'; return; }
+    if (s.status === 'connected'){
+      card.innerHTML = `<div class="ok" style="font-size:16px">✓ Linked${s.me?(' as +'+esc(s.me)):''}</div>
+        <div class="muted" style="margin-top:8px">Answering agent: ${s.boundAgentId?('<b>'+esc(s.boundAgentId)+'</b>'):'<span class="err">none yet — open an agent and click “Connect to my WhatsApp”.</span>'}</div>
+        <div class="muted" style="margin-top:8px">Now message <b>+${esc(s.me||'your number')}</b> from another phone — the bound agent (WAT + Claude) will reply.</div>`;
+      if (waPollTimer){ clearInterval(waPollTimer); waPollTimer=null; }
+    } else if (s.status === 'qr' && s.qrDataUrl){
+      card.innerHTML = `<div>On your phone: <b>WhatsApp → Settings → Linked devices → Link a device</b>, then scan this code:</div>
+        <img alt="WhatsApp QR" src="${s.qrDataUrl}" style="width:264px;height:264px;background:#fff;border-radius:8px;margin-top:12px"/>
+        <div class="muted" style="margin-top:8px">Waiting for the scan… (the code refreshes automatically)</div>`;
+    } else if (s.status === 'connecting'){
+      card.innerHTML = '<span class="muted">Connecting to WhatsApp… generating QR…</span>';
+    } else {
+      card.innerHTML = '';
+      const b = $('<button class="primary">Link my WhatsApp</button>');
+      b.onclick = async ()=>{ b.disabled=true; try{ await api('/api/wa/link','POST'); refresh(); }catch(e){ card.innerHTML='<span class="err">'+esc(e.message)+'</span>'; } };
+      card.appendChild(b);
+    }
+  }
+  await refresh();
+  waPollTimer = setInterval(refresh, 2500);
 }
 
 async function CreateView(wrap){

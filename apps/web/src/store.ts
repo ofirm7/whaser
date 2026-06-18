@@ -14,8 +14,12 @@ import type { WorkflowLlm } from '../../../packages/agent-builder/src/index';
 import { StubLlmClient, StubWorkflowLlm, StubTuner } from './stubs';
 import { makeAnthropicLike, AnthropicWorkflowLlm } from './anthropic';
 import { WorkflowAgentRuntime } from './workflowRuntime';
+import { BaileysChannel } from './baileys';
 
 export type RuntimeModeName = 'claude' | 'stub';
+
+/** Virtual phone_number_id for the QR-linked personal WhatsApp channel. */
+const WA_PERSONAL_PNID = 'wa-personal';
 
 const SALT = 'whaser-demo-salt';
 
@@ -111,14 +115,58 @@ export class AppState {
     return { configured: this.waConfig != null, phoneNumberId: this.waConfig?.phoneNumberId ?? null, boundAgentId: this.boundAgentId };
   }
 
+  /** Bind any channel's number to an agent so inbound messages for it route to that agent. */
+  private bindNumber(agentId: string, tenantId: string, phoneNumberId: string): StoredAgent {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    agent.phoneNumberId = phoneNumberId;
+    this.resolver.bind(phoneNumberId, { agentId: agent.id, tenantId });
+    return agent;
+  }
+
   /** Bind the configured Cloud API number to an agent so inbound messages route to it. */
   bindRealNumber(agentId: string, tenantId: string): StoredAgent {
     if (!this.waConfig) throw new Error('WhatsApp is not configured (set WHATSAPP_* in apps/web/.env)');
-    const agent = this.getAgent(agentId, tenantId);
-    if (!agent) throw new Error('agent not found');
-    agent.phoneNumberId = this.waConfig.phoneNumberId;
-    this.resolver.bind(this.waConfig.phoneNumberId, { agentId: agent.id, tenantId });
-    this.boundAgentId = agent.id;
+    this.boundAgentId = agentId;
+    return this.bindNumber(agentId, tenantId, this.waConfig.phoneNumberId);
+  }
+
+  /** Run an inbound message from any channel (e.g. the QR-linked personal WhatsApp) through the WAT pipeline. */
+  async handleChannelInbound(phoneNumberId: string, from: string, text: string): Promise<{ reply: string | null; routedTo: string | null; blocked: string | null }> {
+    const waMessageId = `ch-${++this.seq}`;
+    const msg: InboundMessage = { waMessageId, from, phoneNumberId, type: 'text', text, timestamp: this.now() };
+    const out = await this.handler(msg);
+    const route = await this.resolver.resolve(phoneNumberId);
+    if (route) {
+      const t = this.transcripts.get(route.agentId) ?? [];
+      t.push({ role: 'user', content: text });
+      if (out?.text) t.push({ role: 'assistant', content: out.text });
+      this.transcripts.set(route.agentId, t.slice(-40));
+      const a = this.agents.get(route.agentId);
+      if (a) a.lastActivityAt = this.now();
+    }
+    return { reply: out?.text ?? null, routedTo: out ? this.runtime.lastRoutedTo : null, blocked: this.lastBlock.get(waMessageId) ?? null };
+  }
+
+  // --- QR-linked personal WhatsApp (Baileys; POC only) ---
+  private baileys: BaileysChannel | null = null;
+  private baileysBoundAgentId: string | null = null;
+
+  async startPersonalLink(): Promise<void> {
+    if (!this.baileys) {
+      this.baileys = new BaileysChannel(async (from, text) => (await this.handleChannelInbound(WA_PERSONAL_PNID, from, text)).reply);
+    }
+    await this.baileys.start();
+  }
+
+  personalLinkStatus(): { status: string; qrDataUrl: string | null; me: string | null; boundAgentId: string | null } {
+    const s = this.baileys?.getStatus() ?? { status: 'disconnected', qrDataUrl: null, me: null };
+    return { ...s, boundAgentId: this.baileysBoundAgentId };
+  }
+
+  bindPersonalNumber(agentId: string, tenantId: string): StoredAgent {
+    const agent = this.bindNumber(agentId, tenantId, WA_PERSONAL_PNID);
+    this.baileysBoundAgentId = agent.id;
     return agent;
   }
 

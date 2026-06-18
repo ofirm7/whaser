@@ -52,3 +52,8 @@ coverage/
 deploy/.env
 deploy/data/
 *.archive.gpg
+
+# WhatsApp (Baileys) personal-link auth state — never commit
+apps/web/.wa-auth/
+.wa-auth/
+apps/web/.wa-auth
