@@ -153,9 +153,9 @@ async function AgentDetailView(wrap, id){
          <div style="margin-top:4px">${a.spec.workflow.routes.map(r=>`<span class="pill">🧭 ${esc(r.intent)} → ${esc(r.target)}</span>`).join('')}</div>
          <div style="margin-top:4px">${a.spec.sub_agents.map(s=>`<span class="pill">🤖 ${esc(s.name)}${s.tool_names.length?(' ['+s.tool_names.map(esc).join(', ')+']'):''}</span>`).join('')}</div></div>`
       : `<div style="margin-top:10px muted"><b>Workflow:</b> <span class="muted">single agent</span></div>`}
+    <div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?('<b>Listening on:</b> '+a.listenChats.map(c=>`<span class="pill">💬 ${esc(c.name)}</span>`).join('')):'<span class="muted"><b>Listening on:</b> no chats selected (chosen during creation)</span>'}</div>
     <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?'Pause':'Resume'}</button>
     <button class="ghost" id="showspec">View AgentSpec</button>
-    <button id="connectpersonal">📱 Connect to my WhatsApp</button>
     ${whatsapp.configured ? `<button id="connectwa" class="${whatsapp.boundAgentId===a.id?'':'primary'}">${whatsapp.boundAgentId===a.id?'✓ Cloud API connected':'📲 Connect Cloud API ('+esc(whatsapp.phoneNumberId)+')'}</button>` : ''}</div>
     <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>`;
   head.querySelector('#toggle').onclick = async ()=>{ await api('/api/agents/'+id+'/'+(a.status==='live'?'pause':'resume'),'POST'); render(); };
@@ -164,10 +164,6 @@ async function AgentDetailView(wrap, id){
   if (cw && whatsapp.boundAgentId!==a.id) cw.onclick = async ()=>{ cw.disabled=true;
     try{ const r=await api('/api/agents/'+id+'/connect-whatsapp','POST'); whatsapp.boundAgentId=r.boundAgentId; render(); }
     catch(e){ alert(e.message); cw.disabled=false; } };
-  const cp = head.querySelector('#connectpersonal');
-  if (cp) cp.onclick = async ()=>{ cp.disabled=true;
-    try{ await api('/api/agents/'+id+'/connect-personal','POST'); cp.textContent='✓ Connected to my WhatsApp'; }
-    catch(e){ alert(e.message); cp.disabled=false; } };
   wrap.appendChild(head);
 
   // WhatsApp simulator
@@ -220,8 +216,8 @@ async function WhatsAppView(wrap){
     let s; try { s = await api('/api/wa/status'); } catch(e){ card.innerHTML = '<span class="err">'+esc(e.message)+'</span>'; return; }
     if (s.status === 'connected'){
       card.innerHTML = `<div class="ok" style="font-size:16px">✓ Linked${s.me?(' as +'+esc(s.me)):''}</div>
-        <div class="muted" style="margin-top:8px">Answering agent: ${s.boundAgentId?('<b>'+esc(s.boundAgentId)+'</b>'):'<span class="err">none yet — open an agent and click “Connect to my WhatsApp”.</span>'}</div>
-        <div class="muted" style="margin-top:8px">Now message <b>+${esc(s.me||'your number')}</b> from another phone — the bound agent (WAT + Claude) will reply.</div>`;
+        <div class="muted" style="margin-top:8px">Each agent replies only in the chats picked during its creation. Use <b>+ Create agent</b> and select its chats.</div>
+        <div class="muted" style="margin-top:6px">Then message <b>+${esc(s.me||'your number')}</b> from a selected chat — the agent (WAT + Claude) replies; unselected chats are ignored.</div>`;
       if (waPollTimer){ clearInterval(waPollTimer); waPollTimer=null; }
     } else if (s.status === 'qr' && s.qrDataUrl){
       card.innerHTML = `<div>On your phone: <b>WhatsApp → Settings → Linked devices → Link a device</b>, then scan this code:</div>
@@ -259,11 +255,47 @@ async function CreateView(wrap){
     input.disabled=false; sendBtn.disabled=false; input.focus();
   } catch(err){ addBub('bot','⚠ '+err.message); return; }
 
+  function handlePrompt(p){
+    if (p.kind==='ask'){ addBub('bot', p.question); }
+    else if (p.kind==='select_chats'){ addBub('bot', p.question); stage='chats'; input.disabled=true; sendBtn.disabled=true; renderChatPicker(); }
+    else { stage='confirm'; addBub('bot', p.text); input.disabled=true; sendBtn.disabled=true; showBuild(); }
+  }
   const ask = async ()=>{ const text=input.value.trim(); if(!text || stage!=='collecting') return; input.value=''; addBub('me',text);
-    const r = await api('/api/wizard/answer','POST',{ sessionId, text });
-    if (r.prompt.kind==='ask'){ addBub('bot', r.prompt.question); }
-    else { stage='confirm'; addBub('bot', r.prompt.text); input.disabled=true; sendBtn.disabled=true; showBuild(); }
+    const r = await api('/api/wizard/answer','POST',{ sessionId, text }); handlePrompt(r.prompt);
   };
+
+  async function renderChatPicker(){
+    actions.innerHTML='';
+    const box=$('<div class="card" style="margin-top:8px"></div>'); actions.appendChild(box);
+    let st; try{ st=await api('/api/wa/status'); }catch{ st={status:'disconnected'}; }
+    if (st.status!=='connected'){
+      box.innerHTML='<div class="muted">Your WhatsApp isn\'t linked yet — link it to choose chats.</div>';
+      const lb=$('<button class="primary" style="margin-top:8px">Link my WhatsApp</button>');
+      lb.onclick=async()=>{ lb.disabled=true; try{ await api('/api/wa/link','POST'); }catch{}
+        const poll=setInterval(async()=>{ let s; try{ s=await api('/api/wa/status'); }catch{ return; }
+          if(s.status==='qr'&&s.qrDataUrl){ box.innerHTML='<div>Scan in WhatsApp → Settings → Linked devices → Link a device:</div><img alt="QR" src="'+s.qrDataUrl+'" style="width:240px;height:240px;background:#fff;border-radius:8px;margin-top:8px"/>'; }
+          if(s.status==='connected'){ clearInterval(poll); renderChatPicker(); } }, 2500); };
+      box.appendChild(lb); return;
+    }
+    const selected=new Map();
+    box.innerHTML='<b>Which chats should this agent answer?</b><div class="muted" style="margin:4px 0 8px">Search your contacts and groups by name or number, then tick the ones to listen on.</div>';
+    const search=$('<input placeholder="Search chats/contacts…"/>'); box.appendChild(search);
+    const chips=$('<div style="margin:8px 0"></div>'); box.appendChild(chips);
+    const results=$('<div style="max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px;margin-top:6px"></div>'); box.appendChild(results);
+    const cont=$('<button class="primary" style="margin-top:10px" disabled>Continue</button>'); box.appendChild(cont);
+    function renderChips(){ chips.innerHTML = selected.size ? [...selected.values()].map(c=>`<span class="pill">${c.isGroup?'👥':'👤'} ${esc(c.name)}</span>`).join('') : '<span class="muted">none selected yet</span>'; cont.disabled = selected.size===0; }
+    async function doSearch(){ let r; try{ r=await api('/api/wa/chats?q='+encodeURIComponent(search.value.trim())); }catch{ r={chats:[]}; }
+      results.innerHTML = r.chats.length ? '' : '<span class="muted">No matches (try a name or number; chats appear after they sync).</span>';
+      r.chats.forEach(c=>{ const row=$('<label style="display:block;padding:4px 2px;cursor:pointer"></label>');
+        row.innerHTML=`<input type="checkbox" ${selected.has(c.id)?'checked':''}/> ${c.isGroup?'👥':'👤'} ${esc(c.name)} <span class="muted">${esc(c.id.split('@')[0])}</span>`;
+        row.querySelector('input').onchange=(e)=>{ if(e.target.checked) selected.set(c.id,{id:c.id,name:c.name,isGroup:c.isGroup}); else selected.delete(c.id); renderChips(); };
+        results.appendChild(row); }); }
+    let t; search.addEventListener('input', ()=>{ clearTimeout(t); t=setTimeout(doSearch, 300); });
+    cont.onclick=async()=>{ cont.disabled=true; addBub('me','Listen on: '+[...selected.values()].map(c=>c.name).join(', '));
+      const r=await api('/api/wizard/select-chats','POST',{ sessionId, chats:[...selected.values()].map(c=>({id:c.id,name:c.name})) });
+      actions.innerHTML=''; handlePrompt(r.prompt); };
+    renderChips(); doSearch();
+  }
   sendBtn.onclick = ()=> ask().catch(e=>addBub('bot','⚠ '+e.message));
   input.addEventListener('keydown', e=>{ if(e.key==='Enter') sendBtn.onclick(); });
 
