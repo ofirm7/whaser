@@ -49,6 +49,10 @@ export class BaileysChannel {
   // Persist the captured chat list so it survives restarts (the history sync only fires on a fresh pair).
   private readonly chatsFile = fileURLToPath(new URL('../.data/wa-chats.json', import.meta.url));
   private saveTimer: any = null;
+  // The linked owner's own recent messages — used to make agents reply in the owner's voice.
+  private readonly ownerStyle: string[] = [];
+  private readonly styleFile = fileURLToPath(new URL('../.data/wa-owner-style.json', import.meta.url));
+  private styleSaveTimer: any = null;
 
   /** onInbound receives (chatJid, senderId, text) and returns the reply text (or null to ignore). */
   constructor(private readonly onInbound: (jid: string, from: string, text: string) => Promise<string | null>) {
@@ -58,6 +62,37 @@ export class BaileysChannel {
         if (Array.isArray(arr)) for (const c of arr) if (c?.id) this.chats.set(c.id, { id: c.id, name: c.name ?? this.numberOf(c.id), isGroup: !!c.isGroup, ts: c.ts ?? 0 });
       }
     } catch { /* ignore */ }
+    try {
+      if (existsSync(this.styleFile)) {
+        const arr = JSON.parse(readFileSync(this.styleFile, 'utf8'));
+        if (Array.isArray(arr)) for (const s of arr) if (typeof s === 'string') this.ownerStyle.push(s);
+      }
+    } catch { /* ignore */ }
+  }
+
+  /** Record one of the owner's own messages as a style sample (deduped, capped). */
+  private recordOwnerMessage(text: string): void {
+    const t = (text ?? '').trim();
+    if (t.length < 2 || t.length > 300) return; // skip trivial / very long
+    if (/^https?:\/\/\S+$/i.test(t)) return; // skip bare links
+    const low = t.toLowerCase();
+    if (this.ownerStyle.some((s) => s.toLowerCase() === low)) return; // dedupe
+    this.ownerStyle.push(t);
+    if (this.ownerStyle.length > 60) this.ownerStyle.splice(0, this.ownerStyle.length - 60);
+    if (this.styleSaveTimer) return;
+    this.styleSaveTimer = setTimeout(() => {
+      this.styleSaveTimer = null;
+      try {
+        const dir = dirname(this.styleFile);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(this.styleFile, JSON.stringify(this.ownerStyle));
+      } catch { /* ignore */ }
+    }, 1500);
+  }
+
+  /** Recent samples of how the owner writes (for style mimicry). */
+  ownerStyleSamples(limit = 30): string[] {
+    return this.ownerStyle.slice(-limit);
   }
 
   private saveChats(): void {
@@ -160,6 +195,9 @@ export class BaileysChannel {
     sock.ev.on('messaging-history.set', (h: any) => {
       for (const c of h?.contacts ?? []) this.recordChat(c.id, contactName(c));
       for (const c of h?.chats ?? []) this.recordChat(c.id, c.name, c.conversationTimestamp ?? c.lastMessageRecvTimestamp);
+      for (const m of h?.messages ?? []) { // bootstrap the owner's style from recent self-authored history
+        if (m?.key?.fromMe) { const t = m.message?.conversation ?? m.message?.extendedTextMessage?.text ?? ''; if (t) this.recordOwnerMessage(t); }
+      }
     });
     sock.ev.on('contacts.upsert', (cs: any[]) => { for (const c of cs ?? []) this.recordChat(c.id, contactName(c)); });
     sock.ev.on('contacts.update', (cs: any[]) => { for (const c of cs ?? []) this.recordChat(c.id, contactName(c)); });
@@ -199,15 +237,19 @@ export class BaileysChannel {
     sock.ev.on('messages.upsert', async (ev: any) => {
       if (ev.type !== 'notify') return;
       for (const m of ev.messages ?? []) {
-        if (!m.message || m.key?.fromMe) continue;
-        const jid: string = m.key?.remoteJid ?? '';
-        // Allow individuals + groups; skip status/broadcast. The agent's chat allow-list
-        // (resolver binding) decides whether to actually reply.
-        if (!jid || jid === 'status@broadcast' || jid.endsWith('@broadcast')) continue;
-        if (!(jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us'))) continue;
+        if (!m.message) continue;
+        const text: string = m.message.conversation ?? m.message.extendedTextMessage?.text ?? '';
+        if (m.key?.fromMe) { if (text) this.recordOwnerMessage(text); continue; } // learn the owner's writing style
+        const rawJid: string = m.key?.remoteJid ?? '';
+        const altJid: string = m.key?.remoteJidAlt ?? '';
+        if (!rawJid || rawJid === 'status@broadcast' || rawJid.endsWith('@broadcast') || rawJid.endsWith('@newsletter')) continue;
+        // Baileys 7.x often addresses a 1:1 chat as <id>@lid (privacy); the phone-number form
+        // (@s.whatsapp.net) is carried in remoteJidAlt. The chat allow-list is bound on the PN /
+        // @g.us form, so match + reply on that.
+        const jid = [rawJid, altJid].find((j) => j && (j.endsWith('@s.whatsapp.net') || j.endsWith('@g.us')));
+        if (!jid) continue; // not an individual/group we can route
         // Bump recency so an active chat floats to the top; pushName names a 1:1 contact.
         this.recordChat(jid, jid.endsWith('@g.us') ? undefined : m.pushName, m.messageTimestamp);
-        const text: string = m.message.conversation ?? m.message.extendedTextMessage?.text ?? '';
         if (!text.trim()) continue;
         const from = this.numberOf(jid);
         try {
