@@ -27,6 +27,10 @@ export class InMemoryAgentResolver implements AgentResolver {
     this.map.set(phoneNumberId, route);
   }
 
+  unbind(phoneNumberId: string): void {
+    this.map.delete(phoneNumberId);
+  }
+
   async resolve(phoneNumberId: string): Promise<AgentRoute | null> {
     return this.map.get(phoneNumberId) ?? null;
   }
