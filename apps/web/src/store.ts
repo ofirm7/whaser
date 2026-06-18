@@ -113,7 +113,17 @@ export class AppState {
       workflowLlm = new StubWorkflowLlm();
       this.tuner = new StubTuner();
     }
-    this.runtime = new WorkflowAgentRuntime(getSpec, workflowLlm);
+    // Wrap the workflow LLM so every reply is steered into the linked owner's personal writing
+    // style (when we have samples of how they write). classifyIntent is passed through unchanged.
+    const baseLlm = workflowLlm;
+    const styledLlm: WorkflowLlm = {
+      classifyIntent: (a) => baseLlm.classifyIntent(a),
+      reply: (a) => {
+        const pre = this.ownerStylePreamble();
+        return baseLlm.reply(pre ? { ...a, systemPrompt: `${pre}\n\n${a.systemPrompt}` } : a);
+      },
+    };
+    this.runtime = new WorkflowAgentRuntime(getSpec, styledLlm);
     this.handler = createAgentReplyHandler({
       resolver: this.resolver,
       runtime: this.runtime,
@@ -231,6 +241,20 @@ export class AppState {
   /** Lazily resolve a linked-account chat's profile photo URL, or null if none/not linked. */
   async personalChatPhoto(jid: string): Promise<string | null> {
     return this.baileys ? this.baileys.profilePhoto(jid) : null;
+  }
+
+  /** A system-prompt preamble steering replies into the linked owner's writing style ('' if no samples). */
+  private ownerStylePreamble(): string {
+    const samples = this.baileys ? this.baileys.ownerStyleSamples(25) : [];
+    if (!samples.length) return '';
+    const list = samples.map((s) => `- ${s.replace(/\s+/g, ' ').trim()}`).join('\n');
+    return (
+      'VOICE — Write every reply as the account owner themselves: mirror their language, exact spelling ' +
+      'and slang/abbreviations (keep their informal forms and transliteration), punctuation, capitalization, ' +
+      'sentence length and structure, formality, and emoji usage. Reply in the same language they use; do not ' +
+      "sound like a generic assistant. Keep the agent's goal and scope, but the VOICE must be the owner's.\n" +
+      'Examples of how the owner writes:\n' + list
+    );
   }
 
   /** Set an agent's chat allow-list and bind each chat jid to it (inbound for those chats → this agent). */
