@@ -116,23 +116,21 @@ export class BaileysChannel {
   async profilePhoto(jid: string): Promise<string | null> {
     if (!jid || !(jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us'))) return null;
     const hit = this.photoCache.get(jid);
-    if (hit && Date.now() - hit.at < BaileysChannel.PHOTO_TTL_MS) return hit.url || null;
+    if (hit) {
+      // Cache hits with a URL last 10 min; misses (no photo / timeout) re-check after 2 min.
+      const ttl = hit.url ? BaileysChannel.PHOTO_TTL_MS : 2 * 60 * 1000;
+      if (Date.now() - hit.at < ttl) return hit.url || null;
+    }
     if (!this.sock || this.status !== 'connected') return hit ? hit.url || null : null;
     try {
-      const url = await this.sock.profilePictureUrl(jid, 'preview');
-      // Verified against Baileys rc13 source: a no-photo contact returns an ERROR IQ → throws
-      // (handled below); a query TIMEOUT is swallowed by waitForMessage and resolves to `undefined`
-      // (socket.js:104-111). So: undefined == timeout → DON'T cache (retry next call).
-      if (typeof url !== 'string' || !url) {
-        if (url === undefined) return null;
-        this.photoCache.set(jid, { url: '', at: Date.now() });
-        return null;
-      }
-      this.photoCache.set(jid, { url, at: Date.now() });
-      return url;
+      // 5s timeout: a non-responding picture IQ otherwise hangs ~60s (Baileys default), and the
+      // picker fires ~100 of these — without a cap they saturate the socket + the browser pool.
+      const url = await this.sock.profilePictureUrl(jid, 'preview', 5000);
+      const ok = typeof url === 'string' && !!url;
+      this.photoCache.set(jid, { url: ok ? url : '', at: Date.now() }); // cache success AND miss/timeout
+      return ok ? url : null;
     } catch {
-      // Thrown = error IQ: 404 item-not-found / 401 not-authorized / 403 forbidden → no available
-      // photo. Negative-cache so we don't re-hammer WhatsApp for the (common) photo-less chats.
+      // Thrown error IQ (404 item-not-found / 401 / 403) = no available photo → negative-cache.
       this.photoCache.set(jid, { url: '', at: Date.now() });
       return null;
     }
