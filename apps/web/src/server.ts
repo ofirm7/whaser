@@ -110,7 +110,31 @@ app.post('/api/wizard/answer', wrap(async (req, res, auth) => {
   }
   const r = await state.builder.submitText(session.values, String(text ?? ''));
   session.values = r.values;
+  // After the conversational slots, insert the chat-selection step before confirming.
+  if (r.complete && !session.selectedChats) {
+    res.json({ prompt: { kind: 'select_chats', question: 'Which WhatsApp chats should this agent respond to? Search and select one or more.' }, complete: false, values: r.values });
+    return;
+  }
   res.json({ prompt: uiPrompt(r.prompt), complete: r.complete, values: r.values });
+}));
+
+app.post('/api/wizard/select-chats', wrap(async (req, res, auth) => {
+  const { sessionId, chats } = (req.body ?? {}) as { sessionId?: string; chats?: Array<{ id?: unknown; name?: unknown }> };
+  const session = state.getSession(String(sessionId));
+  if (!session || session.ownerUsername !== auth.username) {
+    res.sendStatus(404);
+    return;
+  }
+  const list = (Array.isArray(chats) ? chats : [])
+    .filter((c) => c && typeof c.id === 'string' && typeof c.name === 'string')
+    .map((c) => ({ id: String(c.id), name: String(c.name) }));
+  if (!list.length) {
+    res.status(400).json({ error: 'Select at least one chat.' });
+    return;
+  }
+  session.selectedChats = list;
+  const names = list.map((c) => c.name).join(', ');
+  res.json({ prompt: { kind: 'confirm', text: `This agent will respond only in ${list.length} chat(s): ${names}. Ready to build it?` }, selected: list.length });
 }));
 
 app.post('/api/wizard/finalize', wrap(async (req, res, auth) => {
@@ -133,7 +157,8 @@ app.post('/api/wizard/publish', wrap(async (req, res, auth) => {
     return;
   }
   const agent = state.publish(session);
-  res.json({ agentId: agent.id, phoneNumberId: agent.phoneNumberId, status: agent.status });
+  state.bindChatsToAgent(agent.id, session.tenantId, session.selectedChats ?? []);
+  res.json({ agentId: agent.id, listenChats: agent.listenChats, status: agent.status });
 }));
 
 // --- Agents (tenant-scoped) ---
@@ -147,7 +172,7 @@ app.get('/api/agents/:id', wrap(async (req, res, auth) => {
     res.sendStatus(404);
     return;
   }
-  res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername });
+  res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername, listenChats: a.listenChats });
 }));
 
 app.get('/api/whatsapp/status', wrap(async (_req, res) => {
@@ -169,9 +194,8 @@ app.get('/api/wa/status', wrap(async (_req, res) => {
   res.json(state.personalLinkStatus());
 }));
 
-app.post('/api/agents/:id/connect-personal', wrap(async (req, res, auth) => {
-  const a = state.bindPersonalNumber(req.params.id, auth.tenantId);
-  res.json({ id: a.id, boundAgentId: a.id });
+app.get('/api/wa/chats', wrap(async (req, res) => {
+  res.json({ chats: state.listPersonalChats(String(req.query.q ?? '')) });
 }));
 
 app.post('/api/agents/:id/suggest', wrap(async (req, res, auth) => {

@@ -23,6 +23,11 @@ const WA_PERSONAL_PNID = 'wa-personal';
 
 const SALT = 'whaser-demo-salt';
 
+export interface ChatRef {
+  id: string;
+  name: string;
+}
+
 export interface StoredAgent {
   id: string;
   tenantId: string;
@@ -30,6 +35,8 @@ export interface StoredAgent {
   spec: AgentSpec;
   status: 'live' | 'paused';
   phoneNumberId: string;
+  /** WhatsApp chats this agent listens on (allow-list). Empty = simulator-only. */
+  listenChats: ChatRef[];
   createdAt: number;
   lastActivityAt: number | null;
 }
@@ -39,6 +46,7 @@ export interface WizardSession {
   ownerUsername: string;
   tenantId: string;
   values: SlotValues;
+  selectedChats: ChatRef[] | null;
   finalizeResult?: Awaited<ReturnType<AgentBuilder['finalize']>>;
 }
 
@@ -97,6 +105,10 @@ export class AppState {
       this.waWorker = new InboundWorker({ store: this.waStore, gateway, handler: this.handler, onError: (e, m) => console.error('[wa-worker]', m?.waMessageId, e) });
       this.waWorker.start();
     }
+
+    // WhatsApp connected by default: auto-start the personal link (reconnects via .wa-auth
+    // after the one-time QR scan). Fire-and-forget; errors are logged inside the channel.
+    void this.startPersonalLink().catch((e) => console.error('[baileys] auto-start', e));
   }
 
   // --- Real WhatsApp wiring (assigned in the constructor when env is present) ---
@@ -150,23 +162,31 @@ export class AppState {
 
   // --- QR-linked personal WhatsApp (Baileys; POC only) ---
   private baileys: BaileysChannel | null = null;
-  private baileysBoundAgentId: string | null = null;
 
   async startPersonalLink(): Promise<void> {
     if (!this.baileys) {
-      this.baileys = new BaileysChannel(async (from, text) => (await this.handleChannelInbound(WA_PERSONAL_PNID, from, text)).reply);
+      // Resolve inbound by the FULL chat jid (used as the resolver key) so only chats an agent
+      // has been bound to (its allow-list) get a reply.
+      this.baileys = new BaileysChannel(async (jid, from, text) => (await this.handleChannelInbound(jid, from, text)).reply);
     }
     await this.baileys.start();
   }
 
-  personalLinkStatus(): { status: string; qrDataUrl: string | null; me: string | null; boundAgentId: string | null } {
-    const s = this.baileys?.getStatus() ?? { status: 'disconnected', qrDataUrl: null, me: null };
-    return { ...s, boundAgentId: this.baileysBoundAgentId };
+  personalLinkStatus(): { status: string; qrDataUrl: string | null; me: string | null } {
+    return this.baileys?.getStatus() ?? { status: 'disconnected', qrDataUrl: null, me: null };
   }
 
-  bindPersonalNumber(agentId: string, tenantId: string): StoredAgent {
-    const agent = this.bindNumber(agentId, tenantId, WA_PERSONAL_PNID);
-    this.baileysBoundAgentId = agent.id;
+  /** Search the linked account's known chats/contacts (individuals + groups). */
+  listPersonalChats(query: string): { id: string; name: string; isGroup: boolean }[] {
+    return this.baileys ? this.baileys.listChats(query) : [];
+  }
+
+  /** Set an agent's chat allow-list and bind each chat jid to it (inbound for those chats → this agent). */
+  bindChatsToAgent(agentId: string, tenantId: string, chats: ChatRef[]): StoredAgent {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    agent.listenChats = chats;
+    for (const c of chats) this.resolver.bind(c.id, { agentId: agent.id, tenantId });
     return agent;
   }
 
@@ -181,7 +201,7 @@ export class AppState {
 
   // --- Wizard ---
   startSession(ownerUsername: string, tenantId: string): WizardSession {
-    const session: WizardSession = { id: this.id('ws'), ownerUsername, tenantId, values: {} };
+    const session: WizardSession = { id: this.id('ws'), ownerUsername, tenantId, values: {}, selectedChats: null };
     this.sessions.set(session.id, session);
     return session;
   }
@@ -211,6 +231,7 @@ export class AppState {
       spec,
       status: 'live',
       phoneNumberId: `SIM-${1000 + this.agents.size}`,
+      listenChats: [],
       createdAt: this.now(),
       lastActivityAt: null,
     };
