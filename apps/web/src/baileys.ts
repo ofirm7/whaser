@@ -145,10 +145,9 @@ export class BaileysChannel {
       auth: state,
       logger: silentLogger,
       browser: ['Whaser', 'Chrome', '1.0'],
-      // Full history: pull ALL chats (not just the recent slice) so any past 1:1 chat is searchable.
-      // rc13's default shouldSyncHistoryMessage drops FULL chunks, so accept everything explicitly.
-      syncFullHistory: true,
-      shouldSyncHistoryMessage: () => true,
+      // Fetch only the recent slice (fast) — the picker shows the last 100 chats, newest first.
+      // (rc13 defaults syncFullHistory:true, which dumps full history and is slow.)
+      syncFullHistory: false,
       markOnlineOnConnect: false,
     });
     this.sock = sock;
