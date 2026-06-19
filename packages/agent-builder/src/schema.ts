@@ -41,6 +41,13 @@ export interface KnowledgeSource {
   content: string;
 }
 
+/** A Claude Agent Skill (SKILL.md form) attached to an agent post-creation. */
+export interface AgentSkill {
+  name: string;
+  description: string;
+  instructions: string;
+}
+
 export interface SubAgent {
   id: string;
   name: string;
@@ -73,6 +80,8 @@ export interface AgentSpec {
   sub_agents: SubAgent[];
   workflow: Workflow;
   knowledge_sources: KnowledgeSource[];
+  /** Optional Claude Agent Skills added after creation; injected into the system prompt. */
+  skills?: AgentSkill[];
   default_language: string;
   greeting: string;
   fallback_message: string;

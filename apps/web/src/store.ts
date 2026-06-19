@@ -1,5 +1,5 @@
-import { AgentBuilder, AnthropicLlmClient, AnthropicTuner, applySuggestions, validateAgentSpec, checkConsistency } from '../../../packages/agent-builder/src/index';
-import type { AgentSpec, SlotValues, Tuner, TranscriptTurn, TuningSuggestion, TuningResult } from '../../../packages/agent-builder/src/index';
+import { AgentBuilder, AnthropicLlmClient, AnthropicTuner, AnthropicExtender, applySuggestions, applyExtension, validateAgentSpec, checkConsistency } from '../../../packages/agent-builder/src/index';
+import type { AgentSpec, SlotValues, Tuner, TranscriptTurn, TuningSuggestion, TuningResult, Extender, ExtensionKind, SpecExtension } from '../../../packages/agent-builder/src/index';
 import { InMemoryAgentResolver } from '../../../packages/whatsapp-gateway/src/agentResolver';
 import { InMemoryConversationStore, conversationKey } from '../../../packages/whatsapp-gateway/src/conversationStore';
 import { CircuitBreaker } from '../../../packages/whatsapp-gateway/src/circuitBreaker';
@@ -11,7 +11,7 @@ import { InboundWorker } from '../../../packages/whatsapp-gateway/src/worker';
 import type { InboundHandler, InboundMessage, JobStore } from '../../../packages/whatsapp-gateway/src/types';
 import type { RuntimeMessage } from '../../../packages/whatsapp-gateway/src/agentRuntime';
 import type { WorkflowLlm } from '../../../packages/agent-builder/src/index';
-import { StubLlmClient, StubWorkflowLlm, StubTuner } from './stubs';
+import { StubLlmClient, StubWorkflowLlm, StubTuner, StubExtender } from './stubs';
 import { makeAnthropicLike, AnthropicWorkflowLlm } from './anthropic';
 import { WorkflowAgentRuntime } from './workflowRuntime';
 import { BaileysChannel } from './baileys';
@@ -92,6 +92,7 @@ export class AppState {
   private readonly breaker = new CircuitBreaker({ perSenderPerMinute: 20, maxInboundChars: 4000, tenantDailyTokenBudget: 2_000_000 });
   private readonly runtime: WorkflowAgentRuntime;
   private readonly tuner: Tuner;
+  private readonly extender: Extender;
   private readonly handler: InboundHandler;
   private readonly lastBlock = new Map<string, string>();
   private readonly transcripts = new Map<string, TranscriptTurn[]>();
@@ -107,11 +108,13 @@ export class AppState {
       this.builder = new AgentBuilder(new AnthropicLlmClient({ client: makeAnthropicLike(apiKey) }));
       workflowLlm = new AnthropicWorkflowLlm(apiKey);
       this.tuner = new AnthropicTuner({ client: makeAnthropicLike(apiKey) });
+      this.extender = new AnthropicExtender({ client: makeAnthropicLike(apiKey) });
     } else {
       this.mode = 'stub';
       this.builder = new AgentBuilder(new StubLlmClient());
       workflowLlm = new StubWorkflowLlm();
       this.tuner = new StubTuner();
+      this.extender = new StubExtender();
     }
     // Wrap the workflow LLM so every reply is steered into the linked owner's personal writing
     // style (when we have samples of how they write). classifyIntent is passed through unchanged.
@@ -450,6 +453,55 @@ export class AppState {
     if (!schema.valid) throw new Error(`improved spec invalid: ${schema.errors.join('; ')}`);
     const issues = checkConsistency(next);
     if (issues.length) throw new Error(`improved spec inconsistent: ${issues.map((i) => i.message).join('; ')}`);
+    agent.spec = next;
+    this.persist();
+    return agent;
+  }
+
+  // --- Extend an existing agent: Context / Skills / Workflows ---
+  /** AI-draft a spec extension (prior powers the "Ask Changes" loop). */
+  async proposeExtension(agentId: string, tenantId: string, kind: ExtensionKind, instruction: string, prior?: SpecExtension | null): Promise<SpecExtension | null> {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) return null;
+    return this.extender.propose({ spec: agent.spec, kind, instruction, prior: prior ?? null });
+  }
+
+  /** Wrap free text (e.g. an uploaded file) as a ready-to-apply context extension (no LLM). */
+  contextFromText(label: string, text: string): SpecExtension {
+    const content = (text ?? '').trim().slice(0, 12000);
+    const lbl = (label ?? '').trim() || 'note';
+    return { kind: 'context', summary: `Add "${lbl}" (${content.length} chars) as knowledge.`, knowledge: [{ type: 'text', label: lbl, content }] };
+  }
+
+  /** Fetch a URL, strip HTML to text, and wrap as a context extension (fallback: store the link). */
+  async contextFromUrl(url: string): Promise<SpecExtension> {
+    const u = (url ?? '').trim();
+    try {
+      const res = await fetch(u, { signal: AbortSignal.timeout(8000) });
+      const html = await res.text();
+      const text = html
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 8000);
+      if (text) return { kind: 'context', summary: `Fetched ${u} (${text.length} chars).`, knowledge: [{ type: 'text', label: u, content: text }] };
+    } catch {
+      /* fall through to storing the link */
+    }
+    return { kind: 'context', summary: `Store link ${u} (fetch failed/empty).`, knowledge: [{ type: 'url', label: u, content: u }] };
+  }
+
+  /** Apply an approved extension: re-validate + consistency-check, then persist + version-bump. */
+  applyExtension(agentId: string, tenantId: string, ext: SpecExtension): StoredAgent {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    const next = applyExtension(agent.spec, ext);
+    const schema = validateAgentSpec(next);
+    if (!schema.valid) throw new Error(`extended spec invalid: ${schema.errors.join('; ')}`);
+    const issues = checkConsistency(next);
+    if (issues.length) throw new Error(`extended spec inconsistent: ${issues.map((i) => i.message).join('; ')}`);
     agent.spec = next;
     this.persist();
     return agent;

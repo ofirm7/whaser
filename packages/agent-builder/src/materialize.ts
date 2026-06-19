@@ -52,6 +52,11 @@ export function renderInstructions(spec: AgentSpec): string {
     const refs = textKnowledge.map((k) => `${k.label}: ${k.content}`).join('\n');
     sections.push(`Reference information:\n${refs}`);
   }
+  // Attached Claude Agent Skills — fold each SKILL.md (description + body) into the prompt so the
+  // agent applies it. (Single-call reply path → all skill bodies load; simplified progressive disclosure.)
+  for (const skill of spec.skills ?? []) {
+    sections.push(`## Skill: ${skill.name}\n${skill.description}\n\n${skill.instructions}`.trim());
+  }
   return sections.filter(Boolean).join('\n\n');
 }
 

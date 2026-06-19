@@ -1,6 +1,7 @@
 import type { LlmClient, SlotSpec, SlotValue, SlotValues, AgentSpec } from '../../../packages/agent-builder/src/index';
 import type { WorkflowLlm, WorkflowRuntimeMessage } from '../../../packages/agent-builder/src/index';
 import type { Tuner, TranscriptTurn, TuningResult, TuningSuggestion } from '../../../packages/agent-builder/src/index';
+import type { Extender, ExtensionKind, SpecExtension } from '../../../packages/agent-builder/src/index';
 
 const asList = (v: SlotValue | undefined): string[] => (Array.isArray(v) ? v : []);
 const asText = (v: SlotValue | undefined): string => (typeof v === 'string' ? v : '');
@@ -131,6 +132,36 @@ export class StubTuner implements Tuner {
     return {
       summary: `Reviewed ${transcripts.length} messages; ${suggestions.length} suggestion(s). (demo heuristic — connect an Anthropic key for richer analysis.)`,
       suggestions,
+    };
+  }
+}
+
+/** Deterministic stand-in for AnthropicExtender — drafts a plausible extension with no key. */
+export class StubExtender implements Extender {
+  async propose({ kind, instruction, prior }: { spec: AgentSpec; kind: ExtensionKind; instruction: string; prior?: SpecExtension | null }): Promise<SpecExtension> {
+    const text = ((prior ? instruction + ' (revised)' : instruction) || 'new item').trim();
+    if (kind === 'context') {
+      return { kind: 'context', summary: 'Add 1 knowledge note (demo heuristic — connect an Anthropic key for richer drafting).', knowledge: [{ type: 'text', label: 'Note', content: text }] };
+    }
+    if (kind === 'skill') {
+      const name = (slugify(text).replace(/_/g, '-').slice(0, 30)) || 'custom-skill';
+      return {
+        kind: 'skill',
+        summary: `Draft skill "${name}" (demo).`,
+        skill: {
+          name,
+          description: `${text}. Use this whenever the user needs help with: ${text}.`,
+          instructions: `# ${name}\n\nWhen this applies:\n1. Understand the user's request about ${text}.\n2. Help step by step.\n3. Confirm before any action.`,
+        },
+      };
+    }
+    const id = (slugify(text).replace(/_/g, '-').slice(0, 30)) || 'new-area';
+    return {
+      kind: 'workflow',
+      summary: `Add sub-agent "${id}" (demo).`,
+      subAgent: { id, name: text.slice(0, 30) || id, specialty: `Handle: ${text}.`, tool_names: [] },
+      route: { intent: id, description: `Questions about ${text}`, target: id },
+      newTools: [],
     };
   }
 }

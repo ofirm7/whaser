@@ -190,6 +190,7 @@ async function AgentDetailView(wrap, id){
          <div style="margin-top:4px">${a.spec.workflow.routes.map(r=>`<span class="pill">🧭 ${esc(r.intent)} → ${esc(r.target)}</span>`).join('')}</div>
          <div style="margin-top:4px">${a.spec.sub_agents.map(s=>`<span class="pill">🤖 ${esc(s.name)}${s.tool_names.length?(' ['+s.tool_names.map(esc).join(', ')+']'):''}</span>`).join('')}</div></div>`
       : `<div style="margin-top:10px muted"><b>Workflow:</b> <span class="muted">single agent</span></div>`}
+    ${(a.spec.skills&&a.spec.skills.length)?`<div style="margin-top:10px"><b>Skills:</b> ${a.spec.skills.map(s=>`<span class="pill" title="${esc(s.description)}">🧩 ${esc(s.name)}</span>`).join('')}</div>`:''}
     <div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?('<b>Listening on:</b> '+a.listenChats.map(c=>`<span class="pill">💬 ${esc(c.name)}</span>`).join('')):'<span class="muted"><b>Listening on:</b> no chats selected (chosen during creation)</span>'}</div>
     <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?'Pause':'Resume'}</button>
     <button class="ghost" id="showspec">View AgentSpec</button>
@@ -250,6 +251,70 @@ async function AgentDetailView(wrap, id){
         setTimeout(()=>render(),800); };
       box.appendChild(apply);
     }catch(err){ box.innerHTML='<span class="err">'+esc(err.message)+'</span>'; } };
+
+  // --- Extend agent: Context / Skills / Workflows ---
+  function renderExtDetail(ext){
+    if(ext.kind==='context') return ext.knowledge.map(k=>`<div><span class="pill">📎 ${esc(k.label)} · ${esc(k.type)}</span></div><pre style="white-space:pre-wrap;max-height:160px;overflow:auto">${esc(k.content)}</pre>`).join('');
+    if(ext.kind==='skill') return `<div><b>🧩 ${esc(ext.skill.name)}</b><div class="muted">${esc(ext.skill.description)}</div><pre style="white-space:pre-wrap;max-height:220px;overflow:auto">${esc(ext.skill.instructions)}</pre></div>`;
+    if(ext.kind==='workflow') return `<div><b>🤖 ${esc(ext.subAgent.name)}</b> <span class="muted">(${esc(ext.subAgent.id)})</span><div class="muted">${esc(ext.subAgent.specialty)}</div>
+      <div style="margin-top:4px"><span class="pill">🧭 ${esc(ext.route.intent)} → ${esc(ext.route.target)}</span> ${(ext.newTools||[]).map(t=>`<span class="pill">🔧 ${esc(t.name)}</span>`).join('')}</div></div>`;
+    return '';
+  }
+  function showExtensionConfirm(container, ext, repropose){
+    container.innerHTML='';
+    const card=$('<div class="card" style="border-color:var(--accent)"></div>');
+    card.innerHTML=`<h2>Confirm — ${esc(ext.kind)}</h2><div class="muted" style="margin-bottom:8px">${esc(ext.summary||'')}</div><div id="detail"></div>`;
+    card.querySelector('#detail').innerHTML=renderExtDetail(ext);
+    const confirm=$('<button class="primary" style="margin-top:10px">Confirm</button>');
+    confirm.onclick=async()=>{ confirm.disabled=true;
+      try{ const r=await api('/api/agents/'+id+'/extend/apply','POST',{ extension: ext });
+        card.appendChild($(`<div class="ok" style="margin-top:8px">Applied — agent is now v${r.version}. Reloading…</div>`)); setTimeout(()=>render(),800); }
+      catch(e){ card.appendChild($(`<div class="err" style="margin-top:8px">${esc(e.message)}</div>`)); confirm.disabled=false; } };
+    card.appendChild(confirm);
+    if(repropose){
+      const ask=$('<div style="margin-top:12px"></div>');
+      ask.appendChild($('<label>Ask changes</label>'));
+      const ta=$('<textarea rows="2" placeholder="e.g. shorten it / add a step about refunds / rename the sub-agent"></textarea>'); ask.appendChild(ta);
+      const ab=$('<button style="margin-top:6px">Ask Changes</button>');
+      ab.onclick=async()=>{ const t=ta.value.trim(); if(!t)return; ab.disabled=true; card.querySelector('#detail').innerHTML='<span class="muted">Re-drafting…</span>';
+        try{ const next=await repropose(t, ext); showExtensionConfirm(container, next, repropose); }
+        catch(e){ card.querySelector('#detail').innerHTML='<span class="err">'+esc(e.message)+'</span>'; ab.disabled=false; } };
+      ask.appendChild(ab); card.appendChild(ask);
+    }
+    container.appendChild(card);
+  }
+
+  const ext = $('<div class="card"></div>');
+  ext.innerHTML=`<h2>Extend agent</h2><div class="muted" style="margin-bottom:8px">Add context, a skill, or a workflow. Each change is drafted → you review it → Confirm (the agent version bumps).</div>
+    <div style="margin-bottom:12px"><b>Add context</b>
+      <textarea id="ctxdesc" rows="2" placeholder="Describe context for Claude to add…"></textarea>
+      <div class="row" style="margin-top:6px"><button id="ctxdraft">Draft from description</button></div>
+      <div class="row" style="margin-top:6px"><input type="file" id="ctxfile" accept=".txt,.md,.markdown,.csv,.json,.text" style="flex:1"/>
+        <input id="ctxurl" placeholder="https://… (fetch a page)" style="flex:1"/><button id="ctxurlbtn">Add URL</button></div></div>
+    <div style="margin-bottom:12px"><b>Add skill</b> <span class="muted">(Claude Agent Skill)</span>
+      <textarea id="skilldesc" rows="2" placeholder="What should the skill do, and when should it trigger?"></textarea>
+      <button id="skilldraft" style="margin-top:6px">Draft skill</button></div>
+    <div style="margin-bottom:4px"><b>Add workflow</b> <span class="muted">(router sub-agent)</span>
+      <textarea id="wfdesc" rows="2" placeholder="Describe a new task area / sub-agent…"></textarea>
+      <button id="wfdraft" style="margin-top:6px">Draft workflow</button></div>
+    <div id="extout" style="margin-top:10px"></div>`;
+  wrap.appendChild(ext);
+  const out = ext.querySelector('#extout');
+  const proposeFor = (kind)=> (instruction, prior)=> api('/api/agents/'+id+'/extend/propose','POST',{ kind, instruction, prior: prior||null }).then(r=>r.extension);
+  async function draft(kind, text){ if(!text.trim()) return; out.innerHTML='<span class="muted">Drafting…</span>';
+    try{ const e=await proposeFor(kind)(text, null); showExtensionConfirm(out, e, proposeFor(kind)); }
+    catch(err){ out.innerHTML='<span class="err">'+esc(err.message)+'</span>'; } }
+  ext.querySelector('#ctxdraft').onclick=()=>draft('context', ext.querySelector('#ctxdesc').value);
+  ext.querySelector('#skilldraft').onclick=()=>draft('skill', ext.querySelector('#skilldesc').value);
+  ext.querySelector('#wfdraft').onclick=()=>draft('workflow', ext.querySelector('#wfdesc').value);
+  ext.querySelector('#ctxurlbtn').onclick=async()=>{ const u=ext.querySelector('#ctxurl').value.trim(); if(!u)return; out.innerHTML='<span class="muted">Fetching…</span>';
+    try{ const r=await api('/api/agents/'+id+'/extend/context-url','POST',{ url:u }); showExtensionConfirm(out, r.extension, proposeFor('context')); }
+    catch(err){ out.innerHTML='<span class="err">'+esc(err.message)+'</span>'; } };
+  ext.querySelector('#ctxfile').onchange=(e)=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
+    rd.onload=async()=>{ out.innerHTML='<span class="muted">Reading "'+esc(f.name)+'"…</span>';
+      try{ const r=await api('/api/agents/'+id+'/extend/context-file','POST',{ label:f.name, text:String(rd.result||'').slice(0,12000) }); showExtensionConfirm(out, r.extension, proposeFor('context')); }
+      catch(err){ out.innerHTML='<span class="err">'+esc(err.message)+'</span>'; } };
+    rd.readAsText(f); };
 }
 
 async function WhatsAppView(wrap){

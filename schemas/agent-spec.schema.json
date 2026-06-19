@@ -133,6 +133,20 @@
         }
       }
     },
+    "skills": {
+      "type": "array",
+      "description": "Optional Claude Agent Skills (SKILL.md form) added to the agent after creation. Each skill's instructions are injected into the agent's system prompt. Optional for backward compatibility.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "description", "instructions"],
+        "properties": {
+          "name": { "type": "string", "description": "Skill identifier (kebab-case)." },
+          "description": { "type": "string", "description": "What it does AND when to use it (the triggering hint)." },
+          "instructions": { "type": "string", "description": "Imperative SKILL.md body the agent follows." }
+        }
+      }
+    },
     "default_language": { "type": "string", "description": "BCP-47 language tag, e.g. 'en'." },
     "greeting": { "type": "string" },
     "fallback_message": { "type": "string" },
