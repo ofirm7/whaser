@@ -269,6 +269,57 @@ app.post('/api/agents/:id/chats', wrap(async (req, res, auth) => {
   res.json({ id: a.id, listenChats: a.listenChats });
 }));
 
+// --- Extend an existing agent: Context / Skills / Workflows ---
+app.post('/api/agents/:id/extend/propose', wrap(async (req, res, auth) => {
+  const { kind, instruction, prior } = (req.body ?? {}) as { kind?: string; instruction?: string; prior?: unknown };
+  if (kind !== 'context' && kind !== 'skill' && kind !== 'workflow') {
+    res.status(400).json({ error: 'kind must be context|skill|workflow' });
+    return;
+  }
+  const ext = await state.proposeExtension(req.params.id, auth.tenantId, kind, String(instruction ?? ''), (prior ?? null) as never);
+  if (!ext) {
+    res.sendStatus(404);
+    return;
+  }
+  res.json({ extension: ext });
+}));
+
+app.post('/api/agents/:id/extend/context-file', wrap(async (req, res, auth) => {
+  const { label, text } = (req.body ?? {}) as { label?: string; text?: string };
+  if (!state.getAgent(req.params.id, auth.tenantId)) {
+    res.sendStatus(404);
+    return;
+  }
+  if (!String(text ?? '').trim()) {
+    res.status(400).json({ error: 'empty file text' });
+    return;
+  }
+  res.json({ extension: state.contextFromText(String(label ?? 'file'), String(text)) });
+}));
+
+app.post('/api/agents/:id/extend/context-url', wrap(async (req, res, auth) => {
+  const { url } = (req.body ?? {}) as { url?: string };
+  if (!state.getAgent(req.params.id, auth.tenantId)) {
+    res.sendStatus(404);
+    return;
+  }
+  if (!/^https?:\/\//i.test(String(url ?? ''))) {
+    res.status(400).json({ error: 'url must start with http(s)://' });
+    return;
+  }
+  res.json({ extension: await state.contextFromUrl(String(url)) });
+}));
+
+app.post('/api/agents/:id/extend/apply', wrap(async (req, res, auth) => {
+  const { extension } = (req.body ?? {}) as { extension?: unknown };
+  if (!extension || typeof extension !== 'object') {
+    res.status(400).json({ error: 'missing extension' });
+    return;
+  }
+  const a = state.applyExtension(req.params.id, auth.tenantId, extension as never);
+  res.json({ id: a.id, version: a.spec.version });
+}));
+
 app.post('/api/agents/:id/:action', wrap(async (req, res, auth) => {
   const action = req.params.action;
   if (action !== 'pause' && action !== 'resume') {
