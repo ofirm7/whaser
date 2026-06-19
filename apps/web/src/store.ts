@@ -439,10 +439,10 @@ export class AppState {
   }
 
   // --- Self-improvement (spec self-tuning from transcripts) ---
-  async suggestImprovements(agentId: string, tenantId: string): Promise<TuningResult | null> {
+  async suggestImprovements(agentId: string, tenantId: string, instruction?: string): Promise<TuningResult | null> {
     const agent = this.getAgent(agentId, tenantId);
     if (!agent) return null;
-    return this.tuner.suggest({ spec: agent.spec, transcripts: this.transcripts.get(agentId) ?? [] });
+    return this.tuner.suggest({ spec: agent.spec, transcripts: this.transcripts.get(agentId) ?? [], instruction });
   }
 
   applyImprovements(agentId: string, tenantId: string, suggestions: TuningSuggestion[]): StoredAgent {

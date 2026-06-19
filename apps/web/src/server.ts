@@ -245,7 +245,8 @@ app.get('/api/wa/photo', wrap(async (req, res) => {
 }));
 
 app.post('/api/agents/:id/suggest', wrap(async (req, res, auth) => {
-  const r = await state.suggestImprovements(req.params.id, auth.tenantId);
+  const { instruction } = (req.body ?? {}) as { instruction?: string };
+  const r = await state.suggestImprovements(req.params.id, auth.tenantId, instruction);
   if (!r) {
     res.sendStatus(404);
     return;

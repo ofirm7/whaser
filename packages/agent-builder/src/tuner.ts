@@ -22,9 +22,10 @@ export interface TranscriptTurn {
   content: string;
 }
 
-/** Self-improvement seam: review a spec + transcripts and propose AgentSpec edits. Mockable. */
+/** Self-improvement seam: review a spec + transcripts and propose AgentSpec edits. Mockable.
+ *  `instruction` is optional owner guidance ("make it more formal", "stop answering legal qs"). */
 export interface Tuner {
-  suggest(args: { spec: AgentSpec; transcripts: TranscriptTurn[] }): Promise<TuningResult>;
+  suggest(args: { spec: AgentSpec; transcripts: TranscriptTurn[]; instruction?: string }): Promise<TuningResult>;
 }
 
 /** Structured-output schema for tuning suggestions (closed objects, enum kinds). */
@@ -95,8 +96,11 @@ const TUNER_SYSTEM = [
   'You review a WhatsApp agent\'s AgentSpec and recent conversation transcripts, then propose a few',
   'small, concrete improvements as structured suggestions. Prefer high-value edits: add a knowledge',
   'source for a recurring question; add an out_of_scope topic the agent kept being asked about and',
-  'should decline; tighten the refusal or greeting. Each suggestion needs a clear rationale grounded',
-  'in the transcripts. Do not propose changes with no evidence. Keep in/out-of-scope disjoint.',
+  'should decline; tighten the refusal or greeting. Each transcript-based suggestion needs a clear',
+  'rationale grounded in the transcripts; do not invent transcript evidence. If the owner provides',
+  'guidance, PRIORITIZE it — the guidance is itself sufficient justification — and pick the suggestion',
+  'kinds that fulfill it (add_knowledge / add_in_scope / add_out_of_scope / revise_refusal /',
+  'revise_greeting). Keep in/out-of-scope disjoint.',
 ].join(' ');
 
 /** Claude-backed tuner (structured output). Inject an AnthropicLike client. */
@@ -109,7 +113,8 @@ export class AnthropicTuner implements Tuner {
     this.model = opts.model ?? 'claude-sonnet-4-6';
   }
 
-  async suggest({ spec, transcripts }: { spec: AgentSpec; transcripts: TranscriptTurn[] }): Promise<TuningResult> {
+  async suggest({ spec, transcripts, instruction }: { spec: AgentSpec; transcripts: TranscriptTurn[]; instruction?: string }): Promise<TuningResult> {
+    const guidance = instruction && instruction.trim() ? `\n\nOwner's guidance (prioritize this): ${instruction.trim()}` : '';
     const res = await this.client.messages.create({
       model: this.model,
       max_tokens: 4096,
@@ -119,7 +124,7 @@ export class AnthropicTuner implements Tuner {
       messages: [
         {
           role: 'user',
-          content: `AgentSpec:\n${JSON.stringify(spec, null, 2)}\n\nRecent transcripts:\n${JSON.stringify(transcripts, null, 2)}\n\nPropose improvements.`,
+          content: `AgentSpec:\n${JSON.stringify(spec, null, 2)}\n\nRecent transcripts:\n${JSON.stringify(transcripts, null, 2)}${guidance}\n\nPropose improvements.`,
         },
       ],
     });
