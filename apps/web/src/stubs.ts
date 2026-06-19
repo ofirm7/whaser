@@ -114,9 +114,13 @@ export class StubWorkflowLlm implements WorkflowLlm {
  * without a key. Production uses AnthropicTuner.
  */
 export class StubTuner implements Tuner {
-  async suggest({ spec, transcripts }: { spec: AgentSpec; transcripts: TranscriptTurn[] }): Promise<TuningResult> {
+  async suggest({ spec, transcripts, instruction }: { spec: AgentSpec; transcripts: TranscriptTurn[]; instruction?: string }): Promise<TuningResult> {
     const userMsgs = transcripts.filter((t) => t.role === 'user').map((t) => t.content.trim()).filter(Boolean);
     const suggestions: TuningSuggestion[] = [];
+    const guide = (instruction ?? '').trim();
+    if (guide) {
+      suggestions.push({ kind: 'add_knowledge', label: 'Owner guidance', value: guide, rationale: 'Owner-requested improvement (demo: connect an Anthropic key for smarter edits).' });
+    }
     if (userMsgs.length) {
       suggestions.push({
         kind: 'add_knowledge',

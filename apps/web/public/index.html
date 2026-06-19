@@ -233,12 +233,13 @@ async function AgentDetailView(wrap, id){
 
   // Self-improvement panel
   const imp = $('<div class="card"></div>');
-  imp.innerHTML = `<h2>Self-improvement</h2><div class="muted" style="margin-bottom:8px">Reviews recent conversations and proposes AgentSpec edits you approve. Approved changes bump the agent's version.</div>
-    <button id="suggest">Suggest improvements</button><div id="sugg" style="margin-top:10px"></div>`;
+  imp.innerHTML = `<h2>Self-improvement</h2><div class="muted" style="margin-bottom:8px">Tell the agent what to improve (optional), then get editable suggestions you approve — approved changes bump the version. Leave blank to suggest from recent chats.</div>
+    <textarea id="suggestguide" rows="2" placeholder="e.g. be more formal; stop answering legal questions; add our refund policy"></textarea>
+    <button id="suggest" style="margin-top:6px">Suggest improvements</button><div id="sugg" style="margin-top:10px"></div>`;
   wrap.appendChild(imp);
-  imp.querySelector('#suggest').onclick = async ()=>{ const box=imp.querySelector('#sugg'); box.innerHTML='<span class="muted">Analyzing transcripts…</span>';
-    try{ const r = await api('/api/agents/'+id+'/suggest','POST');
-      if(!r.suggestions.length){ box.innerHTML='<span class="muted">'+esc(r.summary)+' Chat with the agent above first, then try again.</span>'; return; }
+  imp.querySelector('#suggest').onclick = async ()=>{ const box=imp.querySelector('#sugg'); const instruction=imp.querySelector('#suggestguide').value.trim(); box.innerHTML='<span class="muted">'+(instruction?'Drafting improvements…':'Analyzing transcripts…')+'</span>';
+    try{ const r = await api('/api/agents/'+id+'/suggest','POST',{ instruction });
+      if(!r.suggestions.length){ box.innerHTML='<span class="muted">'+esc(r.summary)+' Add guidance above, or chat with the agent first.</span>'; return; }
       box.innerHTML = '<div class="muted" style="margin-bottom:8px">'+esc(r.summary)+'</div>';
       r.suggestions.forEach((s,i)=>{ const row=$('<label style="display:block;margin:6px 0"></label>');
         row.innerHTML = `<input type="checkbox" data-i="${i}" checked/> <b>${esc(s.kind)}</b> — ${esc(s.value)} <span class="muted">(${esc(s.rationale)})</span>`;
