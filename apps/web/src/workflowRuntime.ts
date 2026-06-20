@@ -13,6 +13,7 @@ export class WorkflowAgentRuntime implements AgentRuntime {
   constructor(
     private readonly getSpec: (agentId: string) => AgentSpec | undefined,
     private readonly llm: WorkflowLlm,
+    private readonly getStylePreamble?: (agentId: string) => string,
   ) {}
 
   async complete({ agentId, messages }: { agentId: string; messages: RuntimeMessage[]; conversationId?: string }): Promise<AgentReply> {
@@ -21,10 +22,15 @@ export class WorkflowAgentRuntime implements AgentRuntime {
       this.lastRoutedTo = 'default';
       return { text: "This agent isn't available.", usage: { inputTokens: 0, outputTokens: 0 }, finishReason: 'stop' };
     }
+    // Per-call style injection for this agent's owner (no shared mutable state).
+    const pre = this.getStylePreamble?.(agentId) ?? '';
+    const llm: WorkflowLlm = pre
+      ? { classifyIntent: (a) => this.llm.classifyIntent(a), reply: (a) => this.llm.reply({ ...a, systemPrompt: `${pre}\n\n${a.systemPrompt}` }) }
+      : this.llm;
     const wmsgs = messages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-    const r = await new WorkflowEngine(spec, this.llm).handle(wmsgs);
+    const r = await new WorkflowEngine(spec, llm).handle(wmsgs);
     this.lastRoutedTo = r.routedTo;
     return { text: r.text, usage: r.usage, finishReason: 'stop' };
   }

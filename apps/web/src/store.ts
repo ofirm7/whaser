@@ -16,7 +16,7 @@ import { makeAnthropicLike, AnthropicWorkflowLlm } from './anthropic';
 import { WorkflowAgentRuntime } from './workflowRuntime';
 import { BaileysChannel } from './baileys';
 import { loadAgents, saveAgents } from './persistence';
-import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, existsSync, statSync, mkdirSync, renameSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 export type RuntimeModeName = 'claude' | 'stub';
@@ -116,17 +116,9 @@ export class AppState {
       this.tuner = new StubTuner();
       this.extender = new StubExtender();
     }
-    // Wrap the workflow LLM so every reply is steered into the linked owner's personal writing
-    // style (when we have samples of how they write). classifyIntent is passed through unchanged.
-    const baseLlm = workflowLlm;
-    const styledLlm: WorkflowLlm = {
-      classifyIntent: (a) => baseLlm.classifyIntent(a),
-      reply: (a) => {
-        const pre = this.ownerStylePreamble();
-        return baseLlm.reply(pre ? { ...a, systemPrompt: `${pre}\n\n${a.systemPrompt}` } : a);
-      },
-    };
-    this.runtime = new WorkflowAgentRuntime(getSpec, styledLlm);
+    // Steer each reply into the agent owner's personal writing style — per-tenant samples, resolved
+    // per-call inside the runtime for the agent being replied to (race-free across tenants).
+    this.runtime = new WorkflowAgentRuntime(getSpec, workflowLlm, (agentId) => this.ownerStylePreambleForAgent(agentId));
     this.handler = createAgentReplyHandler({
       resolver: this.resolver,
       runtime: this.runtime,
@@ -136,11 +128,12 @@ export class AppState {
       onBlocked: (reason, msg) => this.lastBlock.set(msg.waMessageId, reason),
     });
 
-    // Persisted agents survive restarts: load them + re-bind their SIM number and chat allow-list.
+    // Persisted agents survive restarts: load them + re-bind their SIM number and chat allow-list
+    // (chat keys are tenant-scoped so the same contact in two users' accounts can't collide).
     for (const a of loadAgents()) {
       this.agents.set(a.id, a);
       this.resolver.bind(a.phoneNumberId, { agentId: a.id, tenantId: a.tenantId });
-      for (const c of a.listenChats) this.resolver.bind(c.id, { agentId: a.id, tenantId: a.tenantId });
+      for (const c of a.listenChats) this.resolver.bind(this.chatKey(a.tenantId, c.id), { agentId: a.id, tenantId: a.tenantId });
       const m = a.phoneNumberId.match(/^SIM-(\d+)$/);
       if (m) this.simSeq = Math.max(this.simSeq, Number(m[1]) - 1000 + 1);
     }
@@ -160,9 +153,10 @@ export class AppState {
       this.waWorker.start();
     }
 
-    // WhatsApp connected by default: auto-start the personal link (reconnects via .wa-auth
-    // after the one-time QR scan). Fire-and-forget; errors are logged inside the channel.
-    void this.startPersonalLink().catch((e) => console.error('[baileys] auto-start', e));
+    // Per-user WhatsApp: migrate the legacy single link into tenant "acme" once, then reconnect
+    // every tenant that has linked before (each its own channel). New users link on demand.
+    this.migrateLegacyLink();
+    for (const t of this.linkedTenants()) void this.channelFor(t).start().catch((e) => console.error('[baileys] auto-start', t, e));
 
     // Load the global agents-catalog from committed seed files (once, at startup).
     this.loadCatalog();
@@ -200,14 +194,15 @@ export class AppState {
     return this.bindNumber(agentId, tenantId, this.waConfig.phoneNumberId);
   }
 
-  /** Run an inbound message from any channel (e.g. the QR-linked personal WhatsApp) through the WAT pipeline. */
-  async handleChannelInbound(phoneNumberId: string, from: string, text: string): Promise<{ reply: string | null; routedTo: string | null; blocked: string | null }> {
+  /** Run an inbound message from a tenant's personal WhatsApp through the WAT pipeline. */
+  async handleChannelInbound(tenantId: string, jid: string, from: string, text: string): Promise<{ reply: string | null; routedTo: string | null; blocked: string | null }> {
     const waMessageId = `ch-${++this.seq}`;
-    const msg: InboundMessage = { waMessageId, from, phoneNumberId, type: 'text', text, timestamp: this.now() };
+    const key = this.chatKey(tenantId, jid); // tenant-scoped so two users can't collide on a contact
+    const msg: InboundMessage = { waMessageId, from, phoneNumberId: key, type: 'text', text, timestamp: this.now() };
     const out = await this.handler(msg);
     const blocked = this.lastBlock.get(waMessageId) ?? null;
     const routedTo = out ? this.runtime.lastRoutedTo : null;
-    const route = await this.resolver.resolve(phoneNumberId);
+    const route = await this.resolver.resolve(key);
     if (route) {
       const t = this.transcripts.get(route.agentId) ?? [];
       t.push({ role: 'user', content: text });
@@ -215,40 +210,80 @@ export class AppState {
       this.transcripts.set(route.agentId, t.slice(-40));
       const a = this.agents.get(route.agentId);
       if (a) a.lastActivityAt = this.now();
-      this.logActivity({ ts: this.now(), tenantId: route.tenantId, agentId: route.agentId, agentName: a?.spec.agent_name ?? route.agentId, channel: 'whatsapp', chatId: phoneNumberId, from, text, routedTo, reply: out?.text ?? null, blocked });
+      this.logActivity({ ts: this.now(), tenantId: route.tenantId, agentId: route.agentId, agentName: a?.spec.agent_name ?? route.agentId, channel: 'whatsapp', chatId: jid, from, text, routedTo, reply: out?.text ?? null, blocked });
     }
     return { reply: out?.text ?? null, routedTo, blocked };
   }
 
-  // --- QR-linked personal WhatsApp (Baileys; POC only) ---
-  private baileys: BaileysChannel | null = null;
+  // --- Per-user QR-linked personal WhatsApp (Baileys; POC only) ---
+  private readonly channels = new Map<string, BaileysChannel>();
+  private chatKey(tenantId: string, jid: string): string { return `${tenantId}::${jid}`; }
 
-  async startPersonalLink(): Promise<void> {
-    if (!this.baileys) {
-      // Resolve inbound by the FULL chat jid (used as the resolver key) so only chats an agent
-      // has been bound to (its allow-list) get a reply.
-      this.baileys = new BaileysChannel(async (jid, from, text) => (await this.handleChannelInbound(jid, from, text)).reply);
+  /** Lazily create the tenant's own WhatsApp channel (own auth/chats/style, isolated inbound). */
+  private channelFor(tenantId: string): BaileysChannel {
+    let ch = this.channels.get(tenantId);
+    if (!ch) {
+      ch = new BaileysChannel(tenantId, async (jid, from, text) => (await this.handleChannelInbound(tenantId, jid, from, text)).reply);
+      this.channels.set(tenantId, ch);
     }
-    await this.baileys.start();
+    return ch;
   }
 
-  personalLinkStatus(): { status: string; qrDataUrl: string | null; me: string | null } {
-    return this.baileys?.getStatus() ?? { status: 'disconnected', qrDataUrl: null, me: null };
+  /** Tenants that have linked before (have persisted creds) — reconnected on boot. */
+  private linkedTenants(): string[] {
+    const root = fileURLToPath(new URL('../.wa-auth', import.meta.url));
+    if (!existsSync(root)) return [];
+    const out: string[] = [];
+    for (const d of readdirSync(root)) {
+      try { if (statSync(`${root}/${d}`).isDirectory() && existsSync(`${root}/${d}/creds.json`)) out.push(d); } catch { /* ignore */ }
+    }
+    return out;
   }
 
-  /** Search the linked account's known chats/contacts (individuals + groups). */
-  listPersonalChats(query: string): { id: string; name: string; isGroup: boolean }[] {
-    return this.baileys ? this.baileys.listChats(query) : [];
+  /** One-time: move the legacy single link (.wa-auth root + .data/wa-*.json) into tenant "acme". */
+  private migrateLegacyLink(): void {
+    try {
+      const root = fileURLToPath(new URL('../.wa-auth', import.meta.url));
+      const acme = `${root}/acme`;
+      if (existsSync(`${root}/creds.json`) && !existsSync(acme)) {
+        mkdirSync(acme, { recursive: true });
+        for (const f of readdirSync(root)) {
+          if (f === 'acme') continue;
+          try { if (statSync(`${root}/${f}`).isFile()) renameSync(`${root}/${f}`, `${acme}/${f}`); } catch { /* ignore */ }
+        }
+        const data = fileURLToPath(new URL('../.data', import.meta.url));
+        for (const [from, to] of [['wa-chats.json', 'wa-chats-acme.json'], ['wa-owner-style.json', 'wa-owner-style-acme.json']]) {
+          try { if (existsSync(`${data}/${from}`) && !existsSync(`${data}/${to}`)) renameSync(`${data}/${from}`, `${data}/${to}`); } catch { /* ignore */ }
+        }
+        console.log('[baileys] migrated legacy link -> tenant acme');
+      }
+    } catch (e) { console.error('[baileys] legacy migration failed', e); }
   }
 
-  /** Lazily resolve a linked-account chat's profile photo URL, or null if none/not linked. */
-  async personalChatPhoto(jid: string): Promise<string | null> {
-    return this.baileys ? this.baileys.profilePhoto(jid) : null;
+  async startPersonalLink(tenantId: string): Promise<void> {
+    await this.channelFor(tenantId).start();
   }
 
-  /** A system-prompt preamble steering replies into the linked owner's writing style ('' if no samples). */
-  private ownerStylePreamble(): string {
-    const samples = this.baileys ? this.baileys.ownerStyleSamples(25) : [];
+  personalLinkStatus(tenantId: string): { status: string; qrDataUrl: string | null; me: string | null } {
+    const ch = this.channelFor(tenantId);
+    if (ch.getStatus().status === 'disconnected') void ch.start().catch((e) => console.error('[baileys] start', tenantId, e));
+    return ch.getStatus();
+  }
+
+  /** Search the tenant's linked account's known chats/contacts (individuals + groups). */
+  listPersonalChats(tenantId: string, query: string): { id: string; name: string; isGroup: boolean }[] {
+    return this.channels.get(tenantId)?.listChats(query) ?? [];
+  }
+
+  /** Lazily resolve a chat's profile photo URL for the tenant's linked account, or null. */
+  async personalChatPhoto(tenantId: string, jid: string): Promise<string | null> {
+    return this.channels.get(tenantId)?.profilePhoto(jid) ?? null;
+  }
+
+  /** Style preamble for the agent's tenant ('' if no samples) — applied to that agent's replies. */
+  private ownerStylePreambleForAgent(agentId: string): string {
+    const agent = this.agents.get(agentId);
+    const samples = agent ? this.channels.get(agent.tenantId)?.ownerStyleSamples(25) ?? [] : [];
     if (!samples.length) return '';
     const list = samples.map((s) => `- ${s.replace(/\s+/g, ' ').trim()}`).join('\n');
     return (
@@ -260,12 +295,12 @@ export class AppState {
     );
   }
 
-  /** Set an agent's chat allow-list and bind each chat jid to it (inbound for those chats → this agent). */
+  /** Set an agent's chat allow-list and bind each chat jid (tenant-scoped) to it. */
   bindChatsToAgent(agentId: string, tenantId: string, chats: ChatRef[]): StoredAgent {
     const agent = this.getAgent(agentId, tenantId);
     if (!agent) throw new Error('agent not found');
     agent.listenChats = chats;
-    for (const c of chats) this.resolver.bind(c.id, { agentId: agent.id, tenantId });
+    for (const c of chats) this.resolver.bind(this.chatKey(tenantId, c.id), { agentId: agent.id, tenantId });
     this.persist();
     return agent;
   }
@@ -275,9 +310,9 @@ export class AppState {
     const agent = this.getAgent(agentId, tenantId);
     if (!agent) throw new Error('agent not found');
     const newIds = new Set(chats.map((c) => c.id));
-    for (const c of agent.listenChats) if (!newIds.has(c.id)) this.resolver.unbind(c.id);
+    for (const c of agent.listenChats) if (!newIds.has(c.id)) this.resolver.unbind(this.chatKey(tenantId, c.id));
     agent.listenChats = chats;
-    for (const c of chats) this.resolver.bind(c.id, { agentId: agent.id, tenantId });
+    for (const c of chats) this.resolver.bind(this.chatKey(tenantId, c.id), { agentId: agent.id, tenantId });
     this.persist();
     return agent;
   }

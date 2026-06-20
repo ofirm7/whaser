@@ -105,19 +105,32 @@ function Header(){
 function LoginView(){
   const c = $('<div class="center"></div>');
   const card = $('<div class="card login"></div>');
-  card.innerHTML = `<h1>Whaser</h1><div class="muted" style="margin-bottom:8px">AI-driven WhatsApp agent builder</div>
-    <label>Username</label><input id="u" value="alice" autocomplete="username"/>
-    <label>Password</label><input id="p" type="password" value="password" autocomplete="current-password"/>
-    <div style="margin-top:14px" class="row"><button class="primary" id="go">Sign in</button>
-    <span class="muted">via directory (LDAP-like)</span></div>
-    <div class="err" id="e" style="margin-top:10px"></div>
-    <div class="muted" style="margin-top:14px;font-size:12.5px">Try: alice / bob (Acme) · carol (Globex) — password: <code>password</code></div>`;
-  const submit = async ()=>{ try{
-    const d = await api('/api/login','POST',{ username:card.querySelector('#u').value, password:card.querySelector('#p').value });
-    token=d.token; user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp; localStorage.setItem('whaser_token',token); localStorage.setItem('whaser_user',JSON.stringify(user)); view='agents'; render();
-  }catch(err){ card.querySelector('#e').textContent = err.message; } };
-  card.querySelector('#go').onclick = submit;
-  card.querySelectorAll('input').forEach(i=> i.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); }));
+  let amode='login';
+  const submit = async ()=>{ const signup=amode==='signup'; const e=card.querySelector('#e'); if(e) e.textContent='';
+    try{
+      const body={ username:card.querySelector('#u').value.trim(), password:card.querySelector('#p').value };
+      if(signup) body.displayName = (card.querySelector('#dn')||{}).value || '';
+      const d = await api(signup?'/api/register':'/api/login','POST',body);
+      token=d.token; user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp;
+      localStorage.setItem('whaser_token',token); localStorage.setItem('whaser_user',JSON.stringify(user)); view='agents'; render();
+    }catch(err){ const el=card.querySelector('#e'); if(el) el.textContent = err.message; } };
+  function paint(){ const signup=amode==='signup';
+    card.innerHTML = `<h1>Whaser</h1><div class="muted" style="margin-bottom:10px">AI-driven WhatsApp agent builder</div>
+      <div class="row" style="gap:6px;margin-bottom:10px">
+        <button class="${signup?'ghost':'primary'}" data-m="login" style="flex:1">Sign in</button>
+        <button class="${signup?'primary':'ghost'}" data-m="signup" style="flex:1">Sign up</button></div>
+      ${signup?'<label>Display name</label><input id="dn" placeholder="Your name" autocomplete="name"/>':''}
+      <label>Username</label><input id="u" autocomplete="username" placeholder="username"/>
+      <label>Password</label><input id="p" type="password" autocomplete="${signup?'new-password':'current-password'}" placeholder="${signup?'at least 6 characters':'password'}"/>
+      <div style="margin-top:14px"><button class="primary" id="go" style="width:100%">${signup?'Create account':'Sign in'}</button></div>
+      <div class="err" id="e" style="margin-top:10px"></div>
+      <div class="muted" style="margin-top:12px;font-size:12.5px">${signup?'Your account gets its <b>own agents and WhatsApp connection</b>; the catalog is shared.':'New here? Click <b>Sign up</b> to get your own agents + WhatsApp.'}</div>`;
+    card.querySelectorAll('[data-m]').forEach(b=> b.onclick=()=>{ amode=b.dataset.m; paint(); });
+    card.querySelector('#go').onclick = submit;
+    card.querySelectorAll('input').forEach(i=> i.addEventListener('keydown', ev=>{ if(ev.key==='Enter') submit(); }));
+    const f=card.querySelector(signup?'#dn':'#u'); if(f) f.focus();
+  }
+  paint();
   c.appendChild(card); return c;
 }
 
