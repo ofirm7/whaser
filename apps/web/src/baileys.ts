@@ -45,17 +45,22 @@ export class BaileysChannel {
   // jid -> profile photo URL ('' = known no-photo, negative cache). Short-lived; cleared on reconnect.
   private readonly photoCache = new Map<string, { url: string; at: number }>();
   private static readonly PHOTO_TTL_MS = 10 * 60 * 1000; // CDN URLs live ~days, but the user may change the pic
-  private readonly authDir = fileURLToPath(new URL('../.wa-auth', import.meta.url));
+  private readonly authDir: string;
   // Persist the captured chat list so it survives restarts (the history sync only fires on a fresh pair).
-  private readonly chatsFile = fileURLToPath(new URL('../.data/wa-chats.json', import.meta.url));
+  private readonly chatsFile: string;
   private saveTimer: any = null;
   // The linked owner's own recent messages — used to make agents reply in the owner's voice.
   private readonly ownerStyle: string[] = [];
-  private readonly styleFile = fileURLToPath(new URL('../.data/wa-owner-style.json', import.meta.url));
+  private readonly styleFile: string;
   private styleSaveTimer: any = null;
 
-  /** onInbound receives (chatJid, senderId, text) and returns the reply text (or null to ignore). */
-  constructor(private readonly onInbound: (jid: string, from: string, text: string) => Promise<string | null>) {
+  /** Per-tenant channel: `slug` namespaces the auth/chat/style files so each user links their own
+   *  WhatsApp. onInbound receives (chatJid, senderId, text) and returns the reply text (or null). */
+  constructor(slug: string, private readonly onInbound: (jid: string, from: string, text: string) => Promise<string | null>) {
+    const safe = (slug || 'default').replace(/[^a-z0-9_-]/gi, '_');
+    this.authDir = fileURLToPath(new URL('../.wa-auth/' + safe, import.meta.url));
+    this.chatsFile = fileURLToPath(new URL('../.data/wa-chats-' + safe + '.json', import.meta.url));
+    this.styleFile = fileURLToPath(new URL('../.data/wa-owner-style-' + safe + '.json', import.meta.url));
     try {
       if (existsSync(this.chatsFile)) {
         const arr = JSON.parse(readFileSync(this.chatsFile, 'utf8'));

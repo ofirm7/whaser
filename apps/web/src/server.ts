@@ -2,7 +2,7 @@ import './env';
 import express, { type Request, type Response } from 'express';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { authenticate, tenantName } from './directory';
+import { authenticate, registerUser, tenantName } from './directory';
 import { AppState } from './store';
 import type { TuningSuggestion } from '../../../packages/agent-builder/src/index';
 import { createWebhookRouter } from '../../../packages/whatsapp-gateway/src/express';
@@ -78,9 +78,26 @@ app.use(express.json({ limit: '1mb' }));
 
 app.get('/healthz', (_req, res) => res.json({ ok: true, app: 'whaser-web', mode: state.mode }));
 
-app.post('/api/login', (req: Request, res: Response) => {
+// Coarse in-memory rate limiter for the auth endpoints (brute-force / spam guard).
+const authAttempts = new Map<string, { n: number; t: number }>();
+function rateLimited(key: string, max = 10, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const e = authAttempts.get(key);
+  if (!e || now - e.t > windowMs) {
+    authAttempts.set(key, { n: 1, t: now });
+    return false;
+  }
+  e.n += 1;
+  return e.n > max;
+}
+
+app.post('/api/login', async (req: Request, res: Response) => {
   const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
-  const u = authenticate(String(username ?? ''), String(password ?? ''));
+  if (rateLimited('login:' + String(username ?? '').toLowerCase())) {
+    res.status(429).json({ error: 'too many attempts — wait a minute' });
+    return;
+  }
+  const u = await authenticate(String(username ?? ''), String(password ?? ''));
   if (!u) {
     res.status(401).json({ error: 'invalid credentials' });
     return;
@@ -93,6 +110,25 @@ app.post('/api/login', (req: Request, res: Response) => {
     tenantName: tenantName(u.tenantId),
     role: u.role,
   };
+  tokens.set(token, user);
+  res.json({ token, user, mode: state.mode, whatsapp: state.whatsappStatus() });
+});
+
+app.post('/api/register', async (req: Request, res: Response) => {
+  if (rateLimited('register:' + (req.ip ?? ''), 5)) {
+    res.status(429).json({ error: 'too many sign-ups — wait a minute' });
+    return;
+  }
+  const { username, password, displayName } = (req.body ?? {}) as { username?: string; password?: string; displayName?: string };
+  let u;
+  try {
+    u = await registerUser(String(username ?? ''), String(password ?? ''), String(displayName ?? ''));
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : 'registration failed' });
+    return;
+  }
+  const token = randomBytes(24).toString('hex');
+  const user: SessionUser = { username: u.username, displayName: u.displayName, tenantId: u.tenantId, tenantName: u.tenantName, role: u.role };
   tokens.set(token, user);
   res.json({ token, user, mode: state.mode, whatsapp: state.whatsappStatus() });
 });
@@ -219,27 +255,27 @@ app.post('/api/agents/:id/connect-whatsapp', wrap(async (req, res, auth) => {
   res.json({ id: a.id, phoneNumberId: a.phoneNumberId, boundAgentId: a.id });
 }));
 
-// --- QR-linked personal WhatsApp (POC) ---
-app.post('/api/wa/link', wrap(async (_req, res) => {
-  await state.startPersonalLink();
-  res.json(state.personalLinkStatus());
+// --- QR-linked personal WhatsApp (POC) — each user links their OWN account (tenant-scoped) ---
+app.post('/api/wa/link', wrap(async (_req, res, auth) => {
+  await state.startPersonalLink(auth.tenantId);
+  res.json(state.personalLinkStatus(auth.tenantId));
 }));
 
-app.get('/api/wa/status', wrap(async (_req, res) => {
-  res.json(state.personalLinkStatus());
+app.get('/api/wa/status', wrap(async (_req, res, auth) => {
+  res.json(state.personalLinkStatus(auth.tenantId));
 }));
 
-app.get('/api/wa/chats', wrap(async (req, res) => {
-  res.json({ chats: state.listPersonalChats(String(req.query.q ?? '')) });
+app.get('/api/wa/chats', wrap(async (req, res, auth) => {
+  res.json({ chats: state.listPersonalChats(auth.tenantId, String(req.query.q ?? '')) });
 }));
 
-app.get('/api/wa/photo', wrap(async (req, res) => {
+app.get('/api/wa/photo', wrap(async (req, res, auth) => {
   const jid = String(req.query.jid ?? '');
   if (!jid) {
     res.status(400).json({ url: null });
     return;
   }
-  const url = await state.personalChatPhoto(jid);
+  const url = await state.personalChatPhoto(auth.tenantId, jid);
   res.set('Cache-Control', 'private, max-age=300'); // mirror the server-side TTL
   res.json({ url });
 }));
