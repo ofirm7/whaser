@@ -195,10 +195,10 @@ export class AppState {
   }
 
   /** Run an inbound message from a tenant's personal WhatsApp through the WAT pipeline. */
-  async handleChannelInbound(tenantId: string, jid: string, from: string, text: string, image?: { base64: string; mediaType: string }): Promise<{ reply: string | null; routedTo: string | null; blocked: string | null }> {
+  async handleChannelInbound(tenantId: string, jid: string, from: string, text: string, media?: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string }): Promise<{ reply: string | null; routedTo: string | null; blocked: string | null }> {
     const waMessageId = `ch-${++this.seq}`;
     const key = this.chatKey(tenantId, jid); // tenant-scoped so two users can't collide on a contact
-    const msg: InboundMessage = { waMessageId, from, phoneNumberId: key, type: 'text', text, currentTurnImage: image, timestamp: this.now() };
+    const msg: InboundMessage = { waMessageId, from, phoneNumberId: key, type: 'text', text, currentTurnMedia: media, timestamp: this.now() };
     const out = await this.handler(msg);
     const blocked = this.lastBlock.get(waMessageId) ?? null;
     const routedTo = out ? this.runtime.lastRoutedTo : null;
@@ -223,7 +223,7 @@ export class AppState {
   private channelFor(tenantId: string): BaileysChannel {
     let ch = this.channels.get(tenantId);
     if (!ch) {
-      ch = new BaileysChannel(tenantId, async (jid, from, text, image) => (await this.handleChannelInbound(tenantId, jid, from, text, image)).reply);
+      ch = new BaileysChannel(tenantId, async (jid, from, text, media) => (await this.handleChannelInbound(tenantId, jid, from, text, media)).reply);
       this.channels.set(tenantId, ch);
     }
     return ch;

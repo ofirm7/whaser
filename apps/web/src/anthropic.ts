@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { AnthropicLike, AnthropicCreateParams, AnthropicMessage } from '../../../packages/agent-builder/src/index';
-import type { WorkflowLlm, WorkflowRuntimeMessage, WorkflowImage } from '../../../packages/agent-builder/src/index';
+import type { WorkflowLlm, WorkflowRuntimeMessage, WorkflowMedia } from '../../../packages/agent-builder/src/index';
 
 interface RawMessage {
   content: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }>;
@@ -63,18 +63,17 @@ export class AnthropicWorkflowLlm implements WorkflowLlm {
     return typeof intent === 'string' && intent !== 'none' && intents.includes(intent) ? intent : null;
   }
 
-  async reply({ systemPrompt, messages, image }: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; image?: WorkflowImage }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }> {
-    // Attach the current-turn image (if any) to the LAST user message as a vision block.
-    const lastUserIdx = image ? messages.map((m) => m.role).lastIndexOf('user') : -1;
+  async reply({ systemPrompt, messages, media }: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; media?: WorkflowMedia }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }> {
+    // Attach the current-turn media (if any) to the LAST user message: image -> image block (vision),
+    // document(PDF) -> document block. Audio/video never reach here (the API has no such block).
+    const lastUserIdx = media ? messages.map((m) => m.role).lastIndexOf('user') : -1;
     const apiMessages = messages.map((m, i): { role: string; content: unknown } => {
-      if (i === lastUserIdx && image) {
-        return {
-          role: m.role,
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.base64 } },
-            ...(m.content.trim() ? [{ type: 'text', text: m.content }] : []),
-          ],
-        };
+      if (i === lastUserIdx && media) {
+        const block =
+          media.kind === 'document'
+            ? { type: 'document', source: { type: 'base64', media_type: media.mediaType, data: media.base64 }, ...(media.filename ? { title: media.filename } : {}) }
+            : { type: 'image', source: { type: 'base64', media_type: media.mediaType, data: media.base64 } };
+        return { role: m.role, content: [block, ...(m.content.trim() ? [{ type: 'text', text: m.content }] : [])] };
       }
       return { role: m.role, content: m.content };
     });

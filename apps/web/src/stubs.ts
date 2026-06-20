@@ -92,8 +92,8 @@ export class StubWorkflowLlm implements WorkflowLlm {
     return null;
   }
 
-  async reply({ systemPrompt, messages, image }: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; image?: { base64: string; mediaType: string } }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }> {
-    void image; // stub ignores vision; the live AnthropicWorkflowLlm handles images
+  async reply({ systemPrompt, messages, media }: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; media?: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string } }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }> {
+    void media; // stub ignores media; the live AnthropicWorkflowLlm handles image/document blocks
     const hasPrior = messages.some((m) => m.role === 'assistant');
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
     let text: string;
