@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { AnthropicLike, AnthropicCreateParams, AnthropicMessage } from '../../../packages/agent-builder/src/index';
-import type { WorkflowLlm, WorkflowRuntimeMessage } from '../../../packages/agent-builder/src/index';
+import type { WorkflowLlm, WorkflowRuntimeMessage, WorkflowImage } from '../../../packages/agent-builder/src/index';
 
 interface RawMessage {
   content: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }>;
@@ -63,12 +63,26 @@ export class AnthropicWorkflowLlm implements WorkflowLlm {
     return typeof intent === 'string' && intent !== 'none' && intents.includes(intent) ? intent : null;
   }
 
-  async reply({ systemPrompt, messages }: { systemPrompt: string; messages: WorkflowRuntimeMessage[] }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }> {
+  async reply({ systemPrompt, messages, image }: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; image?: WorkflowImage }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }> {
+    // Attach the current-turn image (if any) to the LAST user message as a vision block.
+    const lastUserIdx = image ? messages.map((m) => m.role).lastIndexOf('user') : -1;
+    const apiMessages = messages.map((m, i): { role: string; content: unknown } => {
+      if (i === lastUserIdx && image) {
+        return {
+          role: m.role,
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.base64 } },
+            ...(m.content.trim() ? [{ type: 'text', text: m.content }] : []),
+          ],
+        };
+      }
+      return { role: m.role, content: m.content };
+    });
     const res = (await this.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: systemPrompt,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: apiMessages,
     })) as RawMessage;
     const text = res.stop_reason === 'refusal' ? "I'm sorry, I can't help with that." : res.content.find((b) => b.type === 'text')?.text ?? '';
     return { text, usage: { inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0 } };

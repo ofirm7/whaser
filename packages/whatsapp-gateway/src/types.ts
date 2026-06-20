@@ -10,6 +10,8 @@ export interface InboundMessage {
   type: string;
   /** Body for text messages; undefined otherwise. */
   text?: string;
+  /** An image attached to THIS turn only (base64) — sent to the model, never persisted in history. */
+  currentTurnImage?: { base64: string; mediaType: string };
   /** Epoch seconds. */
   timestamp: number;
 }

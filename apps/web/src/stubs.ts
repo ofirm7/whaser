@@ -92,7 +92,8 @@ export class StubWorkflowLlm implements WorkflowLlm {
     return null;
   }
 
-  async reply({ systemPrompt, messages }: { systemPrompt: string; messages: WorkflowRuntimeMessage[] }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }> {
+  async reply({ systemPrompt, messages, image }: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; image?: { base64: string; mediaType: string } }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }> {
+    void image; // stub ignores vision; the live AnthropicWorkflowLlm handles images
     const hasPrior = messages.some((m) => m.role === 'assistant');
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
     let text: string;

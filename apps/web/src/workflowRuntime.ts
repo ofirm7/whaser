@@ -16,7 +16,7 @@ export class WorkflowAgentRuntime implements AgentRuntime {
     private readonly getStylePreamble?: (agentId: string) => string,
   ) {}
 
-  async complete({ agentId, messages }: { agentId: string; messages: RuntimeMessage[]; conversationId?: string }): Promise<AgentReply> {
+  async complete({ agentId, messages, currentTurnImage }: { agentId: string; messages: RuntimeMessage[]; conversationId?: string; currentTurnImage?: { base64: string; mediaType: string } }): Promise<AgentReply> {
     const spec = this.getSpec(agentId);
     if (!spec) {
       this.lastRoutedTo = 'default';
@@ -30,7 +30,7 @@ export class WorkflowAgentRuntime implements AgentRuntime {
     const wmsgs = messages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-    const r = await new WorkflowEngine(spec, llm).handle(wmsgs);
+    const r = await new WorkflowEngine(spec, llm).handle(wmsgs, currentTurnImage);
     this.lastRoutedTo = r.routedTo;
     return { text: r.text, usage: r.usage, finishReason: 'stop' };
   }

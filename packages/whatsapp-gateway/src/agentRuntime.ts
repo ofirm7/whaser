@@ -19,6 +19,8 @@ export interface AgentRuntime {
     agentId: string;
     messages: RuntimeMessage[];
     conversationId?: string;
+    /** Image for the current turn only (base64) — passed to the model, not stored in history. */
+    currentTurnImage?: { base64: string; mediaType: string };
   }): Promise<AgentReply>;
 }
 
