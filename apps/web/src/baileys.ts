@@ -59,7 +59,7 @@ export class BaileysChannel {
 
   /** Per-tenant channel: `slug` namespaces the auth/chat/style files so each user links their own
    *  WhatsApp. onInbound receives (chatJid, senderId, text) and returns the reply text (or null). */
-  constructor(slug: string, private readonly onInbound: (jid: string, from: string, text: string, image?: { base64: string; mediaType: string }) => Promise<string | null>) {
+  constructor(slug: string, private readonly onInbound: (jid: string, from: string, text: string, media?: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string }) => Promise<string | null>) {
     const safe = (slug || 'default').replace(/[^a-z0-9_-]/gi, '_');
     this.slug = safe;
     this.authDir = fileURLToPath(new URL('../.wa-auth/' + safe, import.meta.url));
@@ -250,9 +250,14 @@ export class BaileysChannel {
         if (!m.message) continue;
         const id: string | undefined = m.key?.id;
         if (id && this.sentIds.has(id)) { this.sentIds.delete(id); continue; } // our own reply echoed back — ignore (loop guard)
-        const imgMsg = m.message.imageMessage ?? m.message.viewOnceMessage?.message?.imageMessage ?? m.message.viewOnceMessageV2?.message?.imageMessage;
-        const caption: string = imgMsg?.caption ?? '';
-        const text: string = m.message.conversation ?? m.message.extendedTextMessage?.text ?? caption ?? '';
+        // Unwrap view-once / captioned-document wrappers to the real content.
+        const content: any = m.message.viewOnceMessage?.message ?? m.message.viewOnceMessageV2?.message ?? m.message;
+        const imgMsg = content.imageMessage;
+        const stickerMsg = content.stickerMessage;
+        const docMsg = content.documentMessage ?? content.documentWithCaptionMessage?.message?.documentMessage;
+        const audMsg = content.audioMessage;
+        const vidMsg = content.videoMessage;
+        let text: string = content.conversation ?? content.extendedTextMessage?.text ?? imgMsg?.caption ?? vidMsg?.caption ?? docMsg?.caption ?? '';
         const rawJid: string = m.key?.remoteJid ?? '';
         const altJid: string = m.key?.remoteJidAlt ?? '';
         if (!rawJid || rawJid === 'status@broadcast' || rawJid.endsWith('@broadcast') || rawJid.endsWith('@newsletter')) continue;
@@ -266,27 +271,53 @@ export class BaileysChannel {
         if (!jid) continue; // not an individual/group we can route
         // Bump recency so an active chat floats to the top; pushName names a 1:1 contact.
         this.recordChat(jid, jid.endsWith('@g.us') ? undefined : m.pushName, m.messageTimestamp);
-        // Download an attached image (current turn only) for vision; on failure/too-large, fall back to text/caption.
-        let image: { base64: string; mediaType: string } | undefined;
-        if (imgMsg) {
+
+        // Download media (current turn only, <=5MB). Returns null on failure/oversize.
+        const dl = async (): Promise<Buffer | null> => {
           try {
-            const buf = (await downloadMediaMessage(m, 'buffer', {}, { logger: silentLogger, reuploadRequest: sock.updateMediaMessage })) as Buffer;
-            if (buf && buf.length <= 5_000_000) {
-              const mt = String(imgMsg.mimetype ?? '').split(';')[0];
-              const mediaType = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mt) ? mt : 'image/jpeg';
-              image = { base64: buf.toString('base64'), mediaType };
-            } else if (buf) {
-              console.error('[baileys] image too large (%d bytes) — replying to caption only', buf.length);
-            }
+            const b = (await downloadMediaMessage(m, 'buffer', {}, { logger: silentLogger, reuploadRequest: sock.updateMediaMessage })) as Buffer;
+            return b && b.length <= 5_000_000 ? b : null;
           } catch (e) {
-            console.error('[baileys] image download failed', e);
+            console.error('[baileys] media download failed', e);
+            return null;
           }
+        };
+
+        let media: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string } | undefined;
+        if (imgMsg || stickerMsg) {
+          const mm = imgMsg ?? stickerMsg;
+          const buf = await dl();
+          if (buf) {
+            const mt = String(mm.mimetype ?? '').split(';')[0];
+            const mediaType = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mt) ? mt : 'image/jpeg';
+            media = { kind: 'image', base64: buf.toString('base64'), mediaType };
+          }
+        } else if (docMsg) {
+          const name = docMsg.fileName ?? 'document';
+          const mime = String(docMsg.mimetype ?? '').split(';')[0];
+          const textLike = /^text\//.test(mime) || mime === 'application/json' || /\.(txt|csv|json|md|markdown|log)$/i.test(name);
+          if (mime === 'application/pdf') {
+            const buf = await dl();
+            if (buf) media = { kind: 'document', base64: buf.toString('base64'), mediaType: 'application/pdf', filename: name };
+            else text = text || `[document: ${name} (PDF) — couldn't be read]`;
+          } else if (textLike) {
+            const buf = await dl();
+            if (buf) text = `${text || `[document: ${name}]`}\n\n${buf.toString('utf8').slice(0, 12000)}`;
+            else text = text || `[document: ${name} (${mime || 'text'}) — couldn't be read]`;
+          } else {
+            text = text || `[document: ${name}${mime ? ` (${mime})` : ''}]`; // unsupported type — acknowledge
+          }
+        } else if (audMsg) {
+          text = text || `[voice message${audMsg.seconds ? `, ${audMsg.seconds}s` : ''}]`; // Claude can't hear audio — acknowledge
+        } else if (vidMsg) {
+          text = text || `[video${vidMsg.seconds ? `, ${vidMsg.seconds}s` : ''}]`; // Claude can't watch video — acknowledge
         }
-        const effectiveText = text.trim() || (image ? '[image]' : '');
-        if (!effectiveText && !image) continue; // nothing actionable
+
+        const effectiveText = text.trim() || (media ? (media.kind === 'document' ? '[document]' : '[image]') : '');
+        if (!effectiveText && !media) continue; // nothing actionable
         const from = this.numberOf(jid);
         try {
-          const reply = await this.onInbound(jid, from, effectiveText, image);
+          const reply = await this.onInbound(jid, from, effectiveText, media);
           if (reply) { const sent = await sock.sendMessage(jid, { text: reply }); const sid = sent?.key?.id; if (sid) this.sentIds.add(sid); }
         } catch (e) {
           console.error('[baileys] inbound error', e);

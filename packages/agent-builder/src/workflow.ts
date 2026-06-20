@@ -6,10 +6,13 @@ export interface WorkflowRuntimeMessage {
   content: string;
 }
 
-/** An image for the current turn only (base64) — attached to the latest user message at reply time. */
-export interface WorkflowImage {
+/** Media for the current turn only (base64) — attached to the latest user message at reply time.
+ *  kind selects the Anthropic block: 'image' -> image block (vision), 'document' -> document block (PDF). */
+export interface WorkflowMedia {
+  kind: 'image' | 'document';
   base64: string;
   mediaType: string;
+  filename?: string;
 }
 
 export interface WorkflowReply {
@@ -22,7 +25,7 @@ export interface WorkflowReply {
 /** The Workflow–Agent–Tool engine's LLM seam: classify intent + produce a reply. Mockable. */
 export interface WorkflowLlm {
   classifyIntent(args: { message: string; routes: Array<{ intent: string; description: string }> }): Promise<string | null>;
-  reply(args: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; image?: WorkflowImage }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }>;
+  reply(args: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; media?: WorkflowMedia }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }>;
 }
 
 /** Root identity + (when routed) the selected sub-agent's specialty and allowed tools. */
@@ -45,7 +48,7 @@ export function handoffMessage(spec: AgentSpec): string {
 export class WorkflowEngine {
   constructor(private readonly spec: AgentSpec, private readonly llm: WorkflowLlm) {}
 
-  async handle(messages: WorkflowRuntimeMessage[], image?: WorkflowImage): Promise<WorkflowReply> {
+  async handle(messages: WorkflowRuntimeMessage[], media?: WorkflowMedia): Promise<WorkflowReply> {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
     let subAgent: SubAgent | null = null;
     let routedTo = 'default';
@@ -66,7 +69,7 @@ export class WorkflowEngine {
       }
     }
 
-    const r = await this.llm.reply({ systemPrompt: composeSystemPrompt(this.spec, subAgent), messages, image });
+    const r = await this.llm.reply({ systemPrompt: composeSystemPrompt(this.spec, subAgent), messages, media });
     return { text: r.text, routedTo, usage: r.usage };
   }
 }

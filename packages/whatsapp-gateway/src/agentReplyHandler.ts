@@ -51,7 +51,7 @@ export function createAgentReplyHandler(opts: AgentReplyHandlerOptions): Inbound
     const reply = await opts.runtime.complete({
       agentId: route.agentId,
       messages: [...history, userMessage],
-      currentTurnImage: msg.currentTurnImage,
+      currentTurnMedia: msg.currentTurnMedia,
     });
 
     opts.breaker.record(route.tenantId, reply.usage.inputTokens + reply.usage.outputTokens);
