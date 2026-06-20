@@ -42,6 +42,8 @@ export class BaileysChannel {
   private qrDataUrl: string | null = null;
   private me: string | null = null;
   private readonly chats = new Map<string, ChatEntry>();
+  // Ids of messages WE sent (agent replies) — skipped when echoed back, so self-chat can't loop.
+  private readonly sentIds = new Set<string>();
   // jid -> profile photo URL ('' = known no-photo, negative cache). Short-lived; cleared on reconnect.
   private readonly photoCache = new Map<string, { url: string; at: number }>();
   private static readonly PHOTO_TTL_MS = 10 * 60 * 1000; // CDN URLs live ~days, but the user may change the pic
@@ -136,14 +138,12 @@ export class BaileysChannel {
   }
 
   /** Search known chats/contacts (individuals + groups), most-recent first; capped at `limit`.
-   *  Excludes the linked account's OWN number — an agent can't receive inbound from "yourself". */
+   *  Includes the "Message Yourself" chat (own number) — agents can answer it (see messages.upsert). */
   listChats(query = '', limit = 100): ChatEntry[] {
     const q = query.trim().toLowerCase();
     // Match the name or the phone-number part only — NOT the full jid, whose "@s.whatsapp.net" /
     // "@g.us" suffix contains common letters (a, s, t, w, h, p, n, e, g, u) and matched everything.
-    const all = [...this.chats.values()].filter((c) =>
-      (!this.me || this.numberOf(c.id) !== this.me) &&
-      (!q || c.name.toLowerCase().includes(q) || this.numberOf(c.id).includes(q)));
+    const all = [...this.chats.values()].filter((c) => !q || c.name.toLowerCase().includes(q) || this.numberOf(c.id).includes(q));
     const junk = (n: string) => /^[\s.,_·\-–—:;'"!?()]+$/.test(n); // name is only punctuation (e.g. "..", "...")
     // recency desc; then real names before punctuation-only/number-only; then alphabetical.
     all.sort((a, b) =>
@@ -248,8 +248,9 @@ export class BaileysChannel {
       if (ev.type !== 'notify') return;
       for (const m of ev.messages ?? []) {
         if (!m.message) continue;
+        const id: string | undefined = m.key?.id;
+        if (id && this.sentIds.has(id)) { this.sentIds.delete(id); continue; } // our own reply echoed back — ignore (loop guard)
         const text: string = m.message.conversation ?? m.message.extendedTextMessage?.text ?? '';
-        if (m.key?.fromMe) { if (text) this.recordOwnerMessage(text); continue; } // learn the owner's writing style
         const rawJid: string = m.key?.remoteJid ?? '';
         const altJid: string = m.key?.remoteJidAlt ?? '';
         if (!rawJid || rawJid === 'status@broadcast' || rawJid.endsWith('@broadcast') || rawJid.endsWith('@newsletter')) continue;
@@ -257,6 +258,9 @@ export class BaileysChannel {
         // (@s.whatsapp.net) is carried in remoteJidAlt. The chat allow-list is bound on the PN /
         // @g.us form, so match + reply on that.
         const jid = [rawJid, altJid].find((j) => j && (j.endsWith('@s.whatsapp.net') || j.endsWith('@g.us')));
+        // "Message Yourself" chat: fromMe but addressed to your own number — the agent SHOULD answer it.
+        const isSelf = !!m.key?.fromMe && !!jid && !!this.me && this.numberOf(jid) === this.me;
+        if (m.key?.fromMe && !isSelf) { if (text) this.recordOwnerMessage(text); continue; } // owner messaging others → style only, don't reply
         if (!jid) continue; // not an individual/group we can route
         // Bump recency so an active chat floats to the top; pushName names a 1:1 contact.
         this.recordChat(jid, jid.endsWith('@g.us') ? undefined : m.pushName, m.messageTimestamp);
@@ -264,7 +268,7 @@ export class BaileysChannel {
         const from = this.numberOf(jid);
         try {
           const reply = await this.onInbound(jid, from, text);
-          if (reply) await sock.sendMessage(jid, { text: reply });
+          if (reply) { const sent = await sock.sendMessage(jid, { text: reply }); const sid = sent?.key?.id; if (sid) this.sentIds.add(sid); }
         } catch (e) {
           console.error('[baileys] inbound error', e);
         }
