@@ -1,4 +1,4 @@
-import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import makeWASocket, { useMultiFileAuthState, DisconnectReason, downloadMediaMessage } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -59,7 +59,7 @@ export class BaileysChannel {
 
   /** Per-tenant channel: `slug` namespaces the auth/chat/style files so each user links their own
    *  WhatsApp. onInbound receives (chatJid, senderId, text) and returns the reply text (or null). */
-  constructor(slug: string, private readonly onInbound: (jid: string, from: string, text: string) => Promise<string | null>) {
+  constructor(slug: string, private readonly onInbound: (jid: string, from: string, text: string, image?: { base64: string; mediaType: string }) => Promise<string | null>) {
     const safe = (slug || 'default').replace(/[^a-z0-9_-]/gi, '_');
     this.slug = safe;
     this.authDir = fileURLToPath(new URL('../.wa-auth/' + safe, import.meta.url));
@@ -250,7 +250,9 @@ export class BaileysChannel {
         if (!m.message) continue;
         const id: string | undefined = m.key?.id;
         if (id && this.sentIds.has(id)) { this.sentIds.delete(id); continue; } // our own reply echoed back — ignore (loop guard)
-        const text: string = m.message.conversation ?? m.message.extendedTextMessage?.text ?? '';
+        const imgMsg = m.message.imageMessage ?? m.message.viewOnceMessage?.message?.imageMessage ?? m.message.viewOnceMessageV2?.message?.imageMessage;
+        const caption: string = imgMsg?.caption ?? '';
+        const text: string = m.message.conversation ?? m.message.extendedTextMessage?.text ?? caption ?? '';
         const rawJid: string = m.key?.remoteJid ?? '';
         const altJid: string = m.key?.remoteJidAlt ?? '';
         if (!rawJid || rawJid === 'status@broadcast' || rawJid.endsWith('@broadcast') || rawJid.endsWith('@newsletter')) continue;
@@ -264,10 +266,27 @@ export class BaileysChannel {
         if (!jid) continue; // not an individual/group we can route
         // Bump recency so an active chat floats to the top; pushName names a 1:1 contact.
         this.recordChat(jid, jid.endsWith('@g.us') ? undefined : m.pushName, m.messageTimestamp);
-        if (!text.trim()) continue;
+        // Download an attached image (current turn only) for vision; on failure/too-large, fall back to text/caption.
+        let image: { base64: string; mediaType: string } | undefined;
+        if (imgMsg) {
+          try {
+            const buf = (await downloadMediaMessage(m, 'buffer', {}, { logger: silentLogger, reuploadRequest: sock.updateMediaMessage })) as Buffer;
+            if (buf && buf.length <= 5_000_000) {
+              const mt = String(imgMsg.mimetype ?? '').split(';')[0];
+              const mediaType = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mt) ? mt : 'image/jpeg';
+              image = { base64: buf.toString('base64'), mediaType };
+            } else if (buf) {
+              console.error('[baileys] image too large (%d bytes) — replying to caption only', buf.length);
+            }
+          } catch (e) {
+            console.error('[baileys] image download failed', e);
+          }
+        }
+        const effectiveText = text.trim() || (image ? '[image]' : '');
+        if (!effectiveText && !image) continue; // nothing actionable
         const from = this.numberOf(jid);
         try {
-          const reply = await this.onInbound(jid, from, text);
+          const reply = await this.onInbound(jid, from, effectiveText, image);
           if (reply) { const sent = await sock.sendMessage(jid, { text: reply }); const sid = sent?.key?.id; if (sid) this.sentIds.add(sid); }
         } catch (e) {
           console.error('[baileys] inbound error', e);
