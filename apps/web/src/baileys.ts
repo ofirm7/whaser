@@ -45,6 +45,7 @@ export class BaileysChannel {
   // jid -> profile photo URL ('' = known no-photo, negative cache). Short-lived; cleared on reconnect.
   private readonly photoCache = new Map<string, { url: string; at: number }>();
   private static readonly PHOTO_TTL_MS = 10 * 60 * 1000; // CDN URLs live ~days, but the user may change the pic
+  private readonly slug: string;
   private readonly authDir: string;
   // Persist the captured chat list so it survives restarts (the history sync only fires on a fresh pair).
   private readonly chatsFile: string;
@@ -58,6 +59,7 @@ export class BaileysChannel {
    *  WhatsApp. onInbound receives (chatJid, senderId, text) and returns the reply text (or null). */
   constructor(slug: string, private readonly onInbound: (jid: string, from: string, text: string) => Promise<string | null>) {
     const safe = (slug || 'default').replace(/[^a-z0-9_-]/gi, '_');
+    this.slug = safe;
     this.authDir = fileURLToPath(new URL('../.wa-auth/' + safe, import.meta.url));
     this.chatsFile = fileURLToPath(new URL('../.data/wa-chats-' + safe + '.json', import.meta.url));
     this.styleFile = fileURLToPath(new URL('../.data/wa-owner-style-' + safe + '.json', import.meta.url));
@@ -133,12 +135,15 @@ export class BaileysChannel {
     this.saveChats();
   }
 
-  /** Search known chats/contacts (individuals + groups), most-recent first; capped at `limit`. */
+  /** Search known chats/contacts (individuals + groups), most-recent first; capped at `limit`.
+   *  Excludes the linked account's OWN number — an agent can't receive inbound from "yourself". */
   listChats(query = '', limit = 100): ChatEntry[] {
     const q = query.trim().toLowerCase();
     // Match the name or the phone-number part only — NOT the full jid, whose "@s.whatsapp.net" /
     // "@g.us" suffix contains common letters (a, s, t, w, h, p, n, e, g, u) and matched everything.
-    const all = [...this.chats.values()].filter((c) => !q || c.name.toLowerCase().includes(q) || this.numberOf(c.id).includes(q));
+    const all = [...this.chats.values()].filter((c) =>
+      (!this.me || this.numberOf(c.id) !== this.me) &&
+      (!q || c.name.toLowerCase().includes(q) || this.numberOf(c.id).includes(q)));
     const junk = (n: string) => /^[\s.,_·\-–—:;'"!?()]+$/.test(n); // name is only punctuation (e.g. "..", "...")
     // recency desc; then real names before punctuation-only/number-only; then alphabetical.
     all.sort((a, b) =>
