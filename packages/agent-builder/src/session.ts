@@ -4,6 +4,12 @@ import { getSlot, nextMissingSlot, validateSlotValue } from './slots';
 export const GREETING =
   "Let's design your WhatsApp agent. I'll ask a few questions, then assemble a precise spec you can review.";
 
+/** Opening message for the free-form conversational builder (replaces the fixed slot interview). */
+export const INTERVIEW_GREETING =
+  "Hi! Let's design your WhatsApp agent together. Tell me what you'd like it to do and who it's for — " +
+  'and anything it should be able to handle, like web search, scheduled or recurring messages, or calling ' +
+  "other services. Describe it in your own words and I'll ask a few follow-ups, then build the full agent.";
+
 /** A confirmation read-back once every slot is answered. */
 export function summarize(values: SlotValues): string {
   const lines = Object.entries(values).map(([id, v]) => {

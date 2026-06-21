@@ -83,7 +83,6 @@ const I18N = { he: {
     "Add workflow": "הוספת תהליך עבודה",
     "Agents": "סוכנים",
     "Analyzing transcripts…": "מנתח תמלולים…",
-    "Answer a few questions — Whaser assembles a precise, validated agent spec. (This is Whaser's differentiator: a conversation, not a flow canvas.)": "ענו על כמה שאלות — Whaser ירכיב מפרט סוכן מדויק ומאומת. (זהו הייחוד של Whaser: שיחה, ולא לוח זרימה.)",
     "Applied — agent is now v{0}. Reloading…": "הוחל — הסוכן כעת בגרסה v{0}. טוען מחדש…",
     "Apply selected": "החלת הנבחרים",
     "Ask Changes": "בקשת שינויים",
@@ -95,7 +94,6 @@ const I18N = { he: {
     "Confirm — {0}": "אישור — {0}",
     "Connecting to WhatsApp… generating QR…": "מתחבר ל-WhatsApp… יוצר קוד QR…",
     "Consistency: {0}": "עקביות: {0}",
-    "Continue": "המשך",
     "Create a new agent": "יצירת סוכן חדש",
     "Create account": "יצירת חשבון",
     "Curated, ready-to-deploy agents — pick one to launch it on a number instantly.": "סוכנים מובחרים, מוכנים לפריסה — בחרו אחד כדי להפעיל אותו על מספר באופן מיידי.",
@@ -119,7 +117,6 @@ const I18N = { he: {
     "Language": "שפה",
     "Last activity: {0}": "פעילות אחרונה: {0}",
     "Link my WhatsApp": "קישור ה-WhatsApp שלי",
-    "Listen on: {0}": "האזנה ל: {0}",
     "Listening on:": "מאזין ל:",
     "Live Claude (ANTHROPIC_API_KEY set)": "Claude חי (ANTHROPIC_API_KEY מוגדר)",
     "Live feed of inbound → routing → reply across your tenant's agents (simulator 🧪 + WhatsApp 📱). Newest first, refreshes automatically.": "הזנה חיה של נכנס ← ניתוב ← תשובה בכל הסוכנים של הארגון שלכם (סימולטור 🧪 + WhatsApp 📱). החדשים ביותר תחילה, מתרענן אוטומטית.",
@@ -154,7 +151,6 @@ const I18N = { he: {
     "Tell the agent what to improve (optional), then get editable suggestions you approve — approved changes bump the version. Leave blank to suggest from recent chats.": "ספרו לסוכן מה לשפר (לא חובה), ואז קבלו הצעות הניתנות לעריכה שאתם מאשרים — שינויים מאושרים מעלים את הגרסה. השאירו ריק כדי להציע על סמך הצ׳אטים האחרונים.",
     "The catalog is empty.": "הקטלוג ריק.",
     "Then message <b>+{0}</b> from a selected chat — the agent (WAT + Claude) replies; unselected chats are ignored.": "לאחר מכן שלחו הודעה אל <b>+{0}</b> מצ׳אט נבחר — הסוכן (WAT + Claude) עונה; צ׳אטים שלא נבחרו מתעלמים מהם.",
-    "Type your answer…": "הקלידו את תשובתכם…",
     "Username": "שם משתמש",
     "View AgentSpec": "הצגת AgentSpec",
     "Waiting for the scan… (the code refreshes automatically)": "ממתין לסריקה… (הקוד מתרענן אוטומטית)",
@@ -197,7 +193,13 @@ const I18N = { he: {
     "📲 Connect Cloud API ({0})": "📲 חיבור Cloud API ({0})",
     "🗑 Delete agent": "🗑 מחיקת סוכן",
     "🧭 routed → {0}": "🧭 נותב ← {0}",
-    "WhatsApp QR": "קוד QR של WhatsApp"
+    "WhatsApp QR": "קוד QR של WhatsApp",
+    "Chat with Whaser to design your agent — describe what you want and the capabilities it needs (web search, webhooks, scheduled messages…). Whaser asks follow-ups, then builds the full agent from the conversation.": "שוחחו עם Whaser כדי לעצב את הסוכן שלכם — תארו מה אתם רוצים ואילו יכולות הוא צריך (חיפוש באינטרנט, webhooks, הודעות מתוזמנות…). Whaser ישאל שאלות המשך, ואז יבנה את הסוכן המלא מתוך השיחה.",
+    "Tell me about your agent…": "ספרו לי על הסוכן שלכם…",
+    "typing…": "מקליד…",
+    "I have enough to design your agent — or keep chatting to refine.": "יש לי מספיק כדי לעצב את הסוכן שלכם — או המשיכו לשוחח כדי לחדד.",
+    "Designing your agent…": "מעצב את הסוכן שלכם…",
+    "Choose which WhatsApp chats this agent should answer, then publish.": "בחרו לאילו צ׳אטים ב-WhatsApp הסוכן יענה, ואז פרסמו."
   } };
 let lang = localStorage.getItem('whaser_lang') || 'en';
 function t(s){ const d = I18N[lang]; return (d && d[s] != null) ? d[s] : s; }
@@ -638,63 +640,70 @@ async function buildChatPicker(container, preselected, saveLabel, onSave){
 
 async function CreateView(wrap){
   wrap.appendChild($(`<h1>${t('Create a new agent')}</h1>`));
-  wrap.appendChild($(`<div class="muted" style="margin-bottom:12px">${t('Answer a few questions — Whaser assembles a precise, validated agent spec. (This is Whaser\'s differentiator: a conversation, not a flow canvas.)')}</div>`));
+  wrap.appendChild($(`<div class="muted" style="margin-bottom:12px">${t('Chat with Whaser to design your agent — describe what you want and the capabilities it needs (web search, webhooks, scheduled messages…). Whaser asks follow-ups, then builds the full agent from the conversation.')}</div>`));
   const card = $('<div class="card"></div>');
   card.innerHTML = `<div class="chat" id="chat"></div>
-    <div class="composer"><input id="msg" placeholder="${t('Type your answer…')}" disabled/><button class="primary" id="send" disabled>${t('Send')}</button></div>
+    <div class="composer"><input id="msg" placeholder="${t('Tell me about your agent…')}" disabled/><button class="primary" id="send" disabled>${t('Send')}</button></div>
     <div id="actions" style="margin-top:12px"></div>`;
   wrap.appendChild(card);
   const chat=card.querySelector('#chat'), input=card.querySelector('#msg'), sendBtn=card.querySelector('#send'), actions=card.querySelector('#actions');
   const addBub=(who,text)=>{ const b=$(`<div class="bub ${who}"></div>`); b.textContent=text; chat.appendChild(b); chat.scrollTop=chat.scrollHeight; };
-  let sessionId=null, stage='collecting';
+  let sessionId=null, sending=false, buildShown=false, resultBox=null;
+  const setBusy=(b)=>{ sending=b; input.disabled=b; sendBtn.disabled=b; };
 
   try {
     const s = await api('/api/wizard/start','POST');
     sessionId=s.sessionId; addBub('bot', s.greeting);
-    if (s.prompt.kind==='ask') addBub('bot', s.prompt.question);
     input.disabled=false; sendBtn.disabled=false; input.focus();
   } catch(err){ addBub('bot',tf('⚠ {0}', err.message)); return; }
 
-  function handlePrompt(p){
-    if (p.kind==='ask'){ addBub('bot', p.question); }
-    else if (p.kind==='select_chats'){ addBub('bot', p.question); stage='chats'; input.disabled=true; sendBtn.disabled=true; renderChatPicker(); }
-    else { stage='confirm'; addBub('bot', p.text); input.disabled=true; sendBtn.disabled=true; showBuild(); }
-  }
-  const ask = async ()=>{ const text=input.value.trim(); if(!text || stage!=='collecting') return; input.value=''; addBub('me',text);
-    const r = await api('/api/wizard/answer','POST',{ sessionId, text }); handlePrompt(r.prompt);
+  const send = async ()=>{ const text=input.value.trim(); if(!text || sending) return; input.value=''; addBub('me',text); setBusy(true);
+    const typing=$(`<div class="bub bot muted">${esc(t('typing…'))}</div>`); chat.appendChild(typing); chat.scrollTop=chat.scrollHeight;
+    try{ const r = await api('/api/wizard/message','POST',{ sessionId, text });
+      typing.remove(); addBub('bot', r.reply);
+      if (r.readyToBuild) showBuildButton();
+    }catch(err){ typing.remove(); addBub('bot',tf('⚠ {0}', err.message)); }
+    setBusy(false); input.focus();
   };
+  sendBtn.onclick = send;
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });
 
-  function renderChatPicker(){
-    buildChatPicker(actions, [], t('Continue'), async (chats)=>{
-      addBub('me',tf('Listen on: {0}', chats.map(c=>c.name).join(', ')));
-      const r=await api('/api/wizard/select-chats','POST',{ sessionId, chats });
-      actions.innerHTML=''; handlePrompt(r.prompt);
-    });
-  }
-  sendBtn.onclick = ()=> ask().catch(e=>addBub('bot',tf('⚠ {0}', e.message)));
-  input.addEventListener('keydown', e=>{ if(e.key==='Enter') sendBtn.onclick(); });
-
-  function showBuild(){
+  function showBuildButton(){
+    if (buildShown) return; buildShown=true;
     actions.innerHTML='';
+    actions.appendChild($(`<div class="muted" style="margin-bottom:6px">${t('I have enough to design your agent — or keep chatting to refine.')}</div>`));
     const b=$(`<button class="primary">${t('Build the agent')}</button>`);
-    b.onclick = async ()=>{ b.disabled=true; try{
+    b.onclick = ()=> buildAgent(b);
+    actions.appendChild(b);
+  }
+
+  async function buildAgent(btn){
+    btn.disabled=true;
+    if (resultBox) resultBox.remove();
+    resultBox=$(`<div class="card" style="margin-top:8px"><span class="muted">${t('Designing your agent…')}</span></div>`);
+    actions.appendChild(resultBox); const box=resultBox;
+    try{
       const r = await api('/api/wizard/finalize','POST',{ sessionId });
-      const box=$('<div class="card" style="margin-top:8px"></div>');
       const status = r.publishable ? `<span class="ok">${t('✓ valid & consistent — ready to publish')}</span>`
         : `<span class="err">${t('needs attention')}</span>`;
       box.innerHTML = `<h2>${t('Generated AgentSpec')}</h2><div style="margin-bottom:8px">${status}</div>
         ${r.schemaErrors.length?`<div class="err">${tf('Schema: {0}', r.schemaErrors.map(esc).join('; '))}</div>`:''}
         ${r.issues.length?`<div class="err">${tf('Consistency: {0}', r.issues.map(i=>esc(i.message)).join('; '))}</div>`:''}
         <pre>${esc(JSON.stringify(r.spec,null,2))}</pre>`;
-      actions.appendChild(box);
-      if (r.publishable){ const p=$(`<button class="primary" style="margin-top:10px">${t('Publish & bind a number')}</button>`);
-        p.onclick = async ()=>{ p.disabled=true; const pub=await api('/api/wizard/publish','POST',{ sessionId });
-          actions.appendChild($(`<div class="ok" style="margin-top:10px">${tf('Published as {0} on {1}. Opening…', esc(pub.agentId), esc(pub.phoneNumberId))}</div>`));
-          setTimeout(()=>{ view='agent:'+pub.agentId; render(); }, 700); };
-        actions.appendChild(p);
+      if (r.publishable){
+        setBusy(true); // design is done — lock the chat while picking chats + publishing
+        box.appendChild($(`<div class="muted" style="margin-top:8px">${t('Choose which WhatsApp chats this agent should answer, then publish.')}</div>`));
+        const pick=$('<div></div>'); box.appendChild(pick);
+        buildChatPicker(pick, [], t('Publish & bind a number'), async (chats, saveBtn)=>{ saveBtn.disabled=true;
+          try{ await api('/api/wizard/select-chats','POST',{ sessionId, chats });
+            const pub=await api('/api/wizard/publish','POST',{ sessionId });
+            box.appendChild($(`<div class="ok" style="margin-top:10px">${tf('Published as {0} on {1}. Opening…', esc(pub.agentId), esc(pub.phoneNumberId))}</div>`));
+            setTimeout(()=>{ view='agent:'+pub.agentId; render(); }, 700);
+          }catch(e){ alert(e.message); saveBtn.disabled=false; } });
+      } else {
+        btn.disabled=false; // let the user refine in chat and rebuild
       }
-    }catch(err){ actions.appendChild($(`<div class="err">${esc(err.message)}</div>`)); b.disabled=false; } };
-    actions.appendChild(b);
+    }catch(err){ box.innerHTML=`<div class="err">${esc(err.message)}</div>`; btn.disabled=false; }
   }
 }
 

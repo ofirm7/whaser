@@ -1,10 +1,10 @@
-import type { LlmClient } from './llm';
+import type { LlmClient, InterviewTurn } from './llm';
 import type { SlotValues } from './slots';
 import type { AgentSpec } from './schema';
 import type { ConsistencyIssue } from './consistency';
 import type { SchemaValidation } from './validate';
 import { nextMissingSlot, isComplete } from './slots';
-import { GREETING, nextPrompt, submitAnswer } from './session';
+import { GREETING, INTERVIEW_GREETING, nextPrompt, submitAnswer } from './session';
 import { validateAgentSpec } from './validate';
 import { checkConsistency } from './consistency';
 
@@ -53,7 +53,28 @@ export class AgentBuilder {
 
   /** Synthesize the AgentSpec from collected answers and run schema + consistency checks. */
   async finalize(values: SlotValues): Promise<FinalizeResult> {
-    const spec = await this.llm.synthesizeSpec({ values });
+    return this.check(await this.llm.synthesizeSpec({ values }));
+  }
+
+  // --- Conversational builder (free-form interview; replaces the fixed slot questionnaire) ---
+
+  /** Opening message that invites the user to describe the agent in their own words. */
+  startInterview(): { greeting: string } {
+    return { greeting: INTERVIEW_GREETING };
+  }
+
+  /** One interviewer turn: the assistant's next message + whether it has enough to build. */
+  async interview(messages: InterviewTurn[]): Promise<{ reply: string; readyToBuild: boolean }> {
+    return this.llm.interview({ messages });
+  }
+
+  /** Synthesize the AgentSpec from the whole interview transcript, then validate + consistency-check. */
+  async finalizeInterview(messages: InterviewTurn[]): Promise<FinalizeResult> {
+    return this.check(await this.llm.synthesizeFromConversation({ messages }));
+  }
+
+  /** Validate + consistency-check a synthesized spec into a FinalizeResult. */
+  private check(spec: unknown): FinalizeResult {
     const schema: SchemaValidation = validateAgentSpec(spec);
     const issues = schema.valid ? checkConsistency(spec as AgentSpec, this.opts) : [];
     return {

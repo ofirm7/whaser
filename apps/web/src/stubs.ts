@@ -1,4 +1,4 @@
-import type { LlmClient, SlotSpec, SlotValue, SlotValues, AgentSpec } from '../../../packages/agent-builder/src/index';
+import type { LlmClient, SlotSpec, SlotValue, SlotValues, AgentSpec, InterviewTurn } from '../../../packages/agent-builder/src/index';
 import type { WorkflowLlm, WorkflowRuntimeMessage } from '../../../packages/agent-builder/src/index';
 import type { Tuner, TranscriptTurn, TuningResult, TuningSuggestion } from '../../../packages/agent-builder/src/index';
 import type { Extender, ExtensionKind, SpecExtension } from '../../../packages/agent-builder/src/index';
@@ -70,6 +70,65 @@ export class StubLlmClient implements LlmClient {
       fallback_message: "Sorry, I didn't catch that — could you rephrase?",
       model_assignment: 'claude-sonnet-4-6',
       needs_sandbox: false,
+    };
+    return spec;
+  }
+
+  // --- Conversational builder stubs (deterministic; no Anthropic key) ---
+
+  async interview({ messages }: { messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }> {
+    const userTurns = messages.filter((m) => m.role === 'user').length;
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+    const demoNote = ' (Demo — connect an Anthropic key for a real design conversation.)';
+    if (/\b(build it|that'?s all|that'?s everything|go ahead|create it|let'?s build|i'?m done)\b/i.test(lastUser)) {
+      return { reply: "Great — I've got enough to design it. Click \"Build the agent\" whenever you're ready." + demoNote, readyToBuild: true };
+    }
+    const scripted = [
+      'Got it. What should it be able to DO — e.g. web search, calling an external API/webhook, scheduling timed or recurring messages, or looking things up? (or say "none")',
+      'Makes sense. Which topics should it stick to, which should it avoid, and when should it hand off to a human?',
+      'Last thing — what tone and default language should it use, and what should it be called?',
+    ];
+    if (userTurns - 1 < scripted.length) return { reply: scripted[userTurns - 1] + demoNote, readyToBuild: false };
+    return { reply: 'Perfect — that\'s enough to design a complete agent. Click "Build the agent" to generate the spec, or keep chatting to refine.' + demoNote, readyToBuild: true };
+  }
+
+  async synthesizeFromConversation({ messages }: { messages: InterviewTurn[] }): Promise<unknown> {
+    const userText = messages.filter((m) => m.role === 'user').map((m) => m.content).join('\n');
+    const all = userText.toLowerCase();
+    const nameMatch = userText.match(/\b(?:called|named|call it|name it|name is)\s+["']?([A-Za-z0-9][A-Za-z0-9 _-]{0,38})/i);
+    const name = (nameMatch ? nameMatch[1] : '').trim() || 'My Agent';
+    const goal = (messages.find((m) => m.role === 'user')?.content ?? '').trim().slice(0, 200) || 'help users over WhatsApp';
+    const tools: AgentSpec['tools'] = [];
+    if (/web ?search|search the web|browse|google|search online/.test(all)) {
+      tools.push({ name: 'web_search', description: 'Call this when the user needs current information from the web.', parameters: [{ name: 'query', type: 'string', description: 'Search query.', required: true }], side_effecting: false });
+    }
+    if (/webhook|external api|call an? api|integration|http request|post to|send (data )?to/.test(all)) {
+      tools.push({ name: 'call_webhook', description: 'Call this to send data to an external API/webhook the user configured.', parameters: [{ name: 'payload', type: 'string', description: 'JSON payload to send.', required: true }], side_effecting: true });
+    }
+    if (/schedul|remind|recurring|every (day|week|morning|hour)|timed|timer|follow.?up|cron/.test(all)) {
+      tools.push({ name: 'schedule_message', description: 'Call this to schedule a timed or recurring message/reminder.', parameters: [{ name: 'when', type: 'string', description: 'When to send it (natural language or ISO time).', required: true }, { name: 'message', type: 'string', description: 'The message to send.', required: true }], side_effecting: true });
+    }
+    if (/look ?up|database|lookup|fetch|retrieve|check (the )?(status|order|account|balance)/.test(all)) {
+      tools.push({ name: 'lookup', description: 'Call this to look up records or data for the user.', parameters: [{ name: 'query', type: 'string', description: 'What to look up.', required: true }], side_effecting: false });
+    }
+    const spec: AgentSpec = {
+      version: 1,
+      agent_name: name,
+      brand_persona: { tone: /formal|professional/.test(all) ? 'formal' : 'friendly', style_notes: 'Be concise and clear — this is a WhatsApp chat.' },
+      goal,
+      in_scope_topics: [],
+      out_of_scope_topics: [],
+      refusal_policy: 'Politely decline out-of-scope requests; offer a human handoff.',
+      escalation_rules: [{ when: 'the user asks for a human', action: 'handoff' }],
+      tools,
+      sub_agents: [],
+      workflow: { mode: 'single', routes: [], on_no_match: 'default' },
+      knowledge_sources: [],
+      default_language: /hebrew|עברית/.test(all) ? 'he' : 'en',
+      greeting: `Hi! I'm ${name}. How can I help?`,
+      fallback_message: "Sorry, I didn't catch that — could you rephrase?",
+      model_assignment: 'claude-sonnet-4-6',
+      needs_sandbox: tools.some((t) => t.side_effecting),
     };
     return spec;
   }

@@ -1,5 +1,5 @@
 import { AgentBuilder, AnthropicLlmClient, AnthropicTuner, AnthropicExtender, applySuggestions, applyExtension, validateAgentSpec, checkConsistency } from '../../../packages/agent-builder/src/index';
-import type { AgentSpec, SlotValues, Tuner, TranscriptTurn, TuningSuggestion, TuningResult, Extender, ExtensionKind, SpecExtension } from '../../../packages/agent-builder/src/index';
+import type { AgentSpec, SlotValues, Tuner, TranscriptTurn, TuningSuggestion, TuningResult, Extender, ExtensionKind, SpecExtension, InterviewTurn } from '../../../packages/agent-builder/src/index';
 import { InMemoryAgentResolver } from '../../../packages/whatsapp-gateway/src/agentResolver';
 import { InMemoryConversationStore, conversationKey } from '../../../packages/whatsapp-gateway/src/conversationStore';
 import { CircuitBreaker } from '../../../packages/whatsapp-gateway/src/circuitBreaker';
@@ -74,6 +74,8 @@ export interface WizardSession {
   ownerUsername: string;
   tenantId: string;
   values: SlotValues;
+  /** Free-form agent-design conversation (the conversational builder; replaces slot Q&A). */
+  messages: InterviewTurn[];
   selectedChats: ChatRef[] | null;
   finalizeResult?: Awaited<ReturnType<AgentBuilder['finalize']>>;
 }
@@ -347,7 +349,7 @@ export class AppState {
 
   // --- Wizard ---
   startSession(ownerUsername: string, tenantId: string): WizardSession {
-    const session: WizardSession = { id: this.id('ws'), ownerUsername, tenantId, values: {}, selectedChats: null };
+    const session: WizardSession = { id: this.id('ws'), ownerUsername, tenantId, values: {}, messages: [], selectedChats: null };
     this.sessions.set(session.id, session);
     return session;
   }

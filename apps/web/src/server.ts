@@ -36,9 +36,6 @@ const wrap =
     });
   };
 
-const uiPrompt = (p: { kind: 'ask'; slot: { id: string; question: string } } | { kind: 'confirm'; text: string }) =>
-  p.kind === 'ask' ? { kind: 'ask', slotId: p.slot.id, question: p.slot.question } : { kind: 'confirm', text: p.text };
-
 const agentSummary = (a: ReturnType<AppState['listAgents']>[number]) => ({
   id: a.id,
   name: a.spec.agent_name,
@@ -145,25 +142,28 @@ app.get('/api/me', (req: Request, res: Response) => {
 // --- Wizard ---
 app.post('/api/wizard/start', wrap(async (_req, res, auth) => {
   const session = state.startSession(auth.username, auth.tenantId);
-  const { greeting, prompt } = state.builder.start();
-  res.json({ sessionId: session.id, greeting, prompt: uiPrompt(prompt) });
+  const { greeting } = state.builder.startInterview();
+  res.json({ sessionId: session.id, greeting });
 }));
 
-app.post('/api/wizard/answer', wrap(async (req, res, auth) => {
+// One turn of the free-form agent-design chat: append the user's message, get the interviewer's
+// next reply, and whether enough is known to build the agent.
+app.post('/api/wizard/message', wrap(async (req, res, auth) => {
   const { sessionId, text } = (req.body ?? {}) as { sessionId?: string; text?: string };
   const session = state.getSession(String(sessionId));
   if (!session || session.ownerUsername !== auth.username) {
     res.sendStatus(404);
     return;
   }
-  const r = await state.builder.submitText(session.values, String(text ?? ''));
-  session.values = r.values;
-  // After the conversational slots, insert the chat-selection step before confirming.
-  if (r.complete && !session.selectedChats) {
-    res.json({ prompt: { kind: 'select_chats', question: 'Which WhatsApp chats should this agent respond to? Search and select one or more.' }, complete: false, values: r.values });
+  const userText = String(text ?? '').trim();
+  if (!userText) {
+    res.status(400).json({ error: 'empty message' });
     return;
   }
-  res.json({ prompt: uiPrompt(r.prompt), complete: r.complete, values: r.values });
+  session.messages.push({ role: 'user', content: userText });
+  const { reply, readyToBuild } = await state.builder.interview(session.messages);
+  session.messages.push({ role: 'assistant', content: reply });
+  res.json({ reply, readyToBuild });
 }));
 
 app.post('/api/wizard/select-chats', wrap(async (req, res, auth) => {
@@ -181,8 +181,7 @@ app.post('/api/wizard/select-chats', wrap(async (req, res, auth) => {
     return;
   }
   session.selectedChats = list;
-  const names = list.map((c) => c.name).join(', ');
-  res.json({ prompt: { kind: 'confirm', text: `This agent will respond only in ${list.length} chat(s): ${names}. Ready to build it?` }, selected: list.length });
+  res.json({ selected: list.length, listenChats: list });
 }));
 
 app.post('/api/wizard/finalize', wrap(async (req, res, auth) => {
@@ -192,7 +191,7 @@ app.post('/api/wizard/finalize', wrap(async (req, res, auth) => {
     res.sendStatus(404);
     return;
   }
-  const r = await state.builder.finalize(session.values);
+  const r = await state.builder.finalizeInterview(session.messages);
   session.finalizeResult = r;
   res.json(r);
 }));
@@ -206,7 +205,7 @@ app.post('/api/wizard/publish', wrap(async (req, res, auth) => {
   }
   const agent = state.publish(session);
   state.bindChatsToAgent(agent.id, session.tenantId, session.selectedChats ?? []);
-  res.json({ agentId: agent.id, listenChats: agent.listenChats, status: agent.status });
+  res.json({ agentId: agent.id, phoneNumberId: agent.phoneNumberId, listenChats: agent.listenChats, status: agent.status });
 }));
 
 // --- Agents (tenant-scoped) ---

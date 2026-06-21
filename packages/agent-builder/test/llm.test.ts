@@ -70,3 +70,51 @@ describe('AnthropicLlmClient.synthesizeSpec', () => {
     await expect(llm.synthesizeSpec({ values: {} })).rejects.toThrow(/refus/i);
   });
 });
+
+describe('AnthropicLlmClient.interview', () => {
+  it('forces the respond tool and returns reply + readiness', async () => {
+    const { client, calls } = fakeAnthropic(() => ({
+      content: [{ type: 'tool_use', name: 'respond', input: { reply: 'What should it do?', ready_to_build: false } }],
+    }));
+    const llm = new AnthropicLlmClient({ client });
+    const r = await llm.interview({ messages: [{ role: 'user', content: 'a support bot' }] });
+    expect(r).toEqual({ reply: 'What should it do?', readyToBuild: false });
+    expect(calls[0].tool_choice).toEqual({ type: 'tool', name: 'respond' });
+    expect(calls[0].messages).toEqual([{ role: 'user', content: 'a support bot' }]);
+  });
+
+  it('passes ready_to_build=true through', async () => {
+    const { client } = fakeAnthropic(() => ({
+      content: [{ type: 'tool_use', name: 'respond', input: { reply: 'Ready!', ready_to_build: true } }],
+    }));
+    const llm = new AnthropicLlmClient({ client });
+    expect(await llm.interview({ messages: [{ role: 'user', content: 'go' }] })).toEqual({ reply: 'Ready!', readyToBuild: true });
+  });
+
+  it('throws on a refusal', async () => {
+    const { client } = fakeAnthropic(() => ({ content: [], stop_reason: 'refusal' }));
+    const llm = new AnthropicLlmClient({ client });
+    await expect(llm.interview({ messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow(/refus|interview/i);
+  });
+});
+
+describe('AnthropicLlmClient.synthesizeFromConversation', () => {
+  it('uses structured output over the transcript and parses the JSON', async () => {
+    const { client, calls } = fakeAnthropic(() => ({
+      content: [{ type: 'text', text: JSON.stringify(validSpec) }],
+    }));
+    const llm = new AnthropicLlmClient({ client });
+    const spec = await llm.synthesizeFromConversation({
+      messages: [
+        { role: 'user', content: 'a pre-sales bot' },
+        { role: 'assistant', content: 'what tools?' },
+        { role: 'user', content: 'web search' },
+      ],
+    });
+    expect(spec).toEqual(validSpec);
+    expect(calls[0].model).toBe('claude-opus-4-8');
+    expect((calls[0].output_config?.format as { type: string }).type).toBe('json_schema');
+    // The whole transcript reaches the model.
+    expect(String((calls[0].messages[0] as { content: string }).content)).toContain('web search');
+  });
+});
