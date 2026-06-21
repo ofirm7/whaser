@@ -514,9 +514,9 @@ export class AppState {
               rooms: Number(input.rooms) || undefined,
             };
             const r = await scanYad2New(agentId, params);
-            if (r.blocked) return `Yad2 blocks automated scraping from this server (Radware anti-bot)${r.source !== 'direct' ? ` even via ${r.source}` : ', and no scraping-API key is set'}. To get LIVE Yad2 data, add ZENROWS_API_KEY or SCRAPER_API_KEY to apps/web/.env. For now use the web_search tool to search yad2.co.il for ${JSON.stringify(params)} and summarize matching apartments.`;
-            if (!r.listings.length) return `Scanned Yad2 (${r.totalMatched} matched ${JSON.stringify(params)}) — no NEW listings since the last scan.`;
-            return `Found ${r.listings.length} NEW Yad2 listing(s) matching ${JSON.stringify(params)}:\n\n${formatListings(r.listings)}`;
+            if (!r.ok) return `Couldn't fetch live Yad2 right now (${r.error ?? 'unavailable'}). Yad2 only serves Israeli IPs — I route through a free IL proxy, but free ones are intermittent. Use the web_search tool now to search yad2.co.il for ${JSON.stringify(params)} and summarize matching apartments. (Tip: set ZENROWS_API_KEY in apps/web/.env for always-on live Yad2 data.)`;
+            if (!r.listings.length) return `Scanned Yad2 via ${r.source} (${r.totalMatched} matched ${JSON.stringify(params)}) — no NEW listings since the last scan.`;
+            return `Found ${r.listings.length} NEW Yad2 listing(s) via ${r.source} matching ${JSON.stringify(params)}:\n\n${formatListings(r.listings)}`;
           }
           return `Use the web_search tool now to find this on the web (inputs: ${JSON.stringify(input)}), then summarize the relevant results for the user.`;
         }
