@@ -78,7 +78,7 @@ describe('AnthropicLlmClient.interview', () => {
     }));
     const llm = new AnthropicLlmClient({ client });
     const r = await llm.interview({ messages: [{ role: 'user', content: 'a support bot' }] });
-    expect(r).toEqual({ reply: 'What should it do?', readyToBuild: false });
+    expect(r).toEqual({ reply: 'What should it do?', readyToBuild: false, buildNow: false });
     expect(calls[0].tool_choice).toEqual({ type: 'tool', name: 'respond' });
     expect(calls[0].messages).toEqual([{ role: 'user', content: 'a support bot' }]);
   });
@@ -88,7 +88,15 @@ describe('AnthropicLlmClient.interview', () => {
       content: [{ type: 'tool_use', name: 'respond', input: { reply: 'Ready!', ready_to_build: true } }],
     }));
     const llm = new AnthropicLlmClient({ client });
-    expect(await llm.interview({ messages: [{ role: 'user', content: 'go' }] })).toEqual({ reply: 'Ready!', readyToBuild: true });
+    expect(await llm.interview({ messages: [{ role: 'user', content: 'go' }] })).toEqual({ reply: 'Ready!', readyToBuild: true, buildNow: false });
+  });
+
+  it('flags build_now when the user asks to build now', async () => {
+    const { client } = fakeAnthropic(() => ({
+      content: [{ type: 'tool_use', name: 'respond', input: { reply: 'Building it now.', ready_to_build: true, build_now: true } }],
+    }));
+    const llm = new AnthropicLlmClient({ client });
+    expect(await llm.interview({ messages: [{ role: 'user', content: 'בנה את זה' }] })).toEqual({ reply: 'Building it now.', readyToBuild: true, buildNow: true });
   });
 
   it('throws on a refusal', async () => {

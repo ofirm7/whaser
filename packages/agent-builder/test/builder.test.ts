@@ -16,8 +16,8 @@ class MockLlm implements LlmClient {
   async synthesizeSpec(): Promise<unknown> {
     return this.specToReturn;
   }
-  async interview({ messages }: { messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }> {
-    return { reply: `heard ${messages.length} message(s)`, readyToBuild: messages.length >= 3 };
+  async interview({ messages }: { messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean; buildNow: boolean }> {
+    return { reply: `heard ${messages.length} message(s)`, readyToBuild: messages.length >= 3, buildNow: false };
   }
   async synthesizeFromConversation(): Promise<unknown> {
     return this.specToReturn;
