@@ -219,7 +219,7 @@ app.get('/api/agents/:id', wrap(async (req, res, auth) => {
     res.sendStatus(404);
     return;
   }
-  res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername, listenChats: a.listenChats });
+  res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername, listenChats: a.listenChats, triggers: a.triggers ?? [] });
 }));
 
 app.delete('/api/agents/:id', wrap(async (req, res, auth) => {
@@ -311,6 +311,93 @@ app.post('/api/agents/:id/chats', wrap(async (req, res, auth) => {
     .map((c) => ({ id: String(c.id), name: String(c.name) }));
   const a = state.editChats(req.params.id, auth.tenantId, list);
   res.json({ id: a.id, listenChats: a.listenChats });
+}));
+
+// --- Scheduled triggers (auto-firing timed actions) ---
+app.post('/api/agents/:id/triggers', wrap(async (req, res, auth) => {
+  if (!state.getAgent(req.params.id, auth.tenantId)) {
+    res.sendStatus(404);
+    return;
+  }
+  const { label, prompt, value, unit, enabled, toolName } = (req.body ?? {}) as Record<string, unknown>;
+  const trigger = state.addTrigger(req.params.id, auth.tenantId, { label, prompt, value, unit, enabled, toolName });
+  res.json({ trigger });
+}));
+
+app.patch('/api/agents/:id/triggers/:trgId', wrap(async (req, res, auth) => {
+  if (!state.getAgent(req.params.id, auth.tenantId)) {
+    res.sendStatus(404);
+    return;
+  }
+  const trigger = state.updateTrigger(req.params.id, auth.tenantId, req.params.trgId, (req.body ?? {}) as Record<string, unknown>);
+  res.json({ trigger });
+}));
+
+app.delete('/api/agents/:id/triggers/:trgId', wrap(async (req, res, auth) => {
+  if (!state.getAgent(req.params.id, auth.tenantId)) {
+    res.sendStatus(404);
+    return;
+  }
+  if (!state.deleteTrigger(req.params.id, auth.tenantId, req.params.trgId)) {
+    res.sendStatus(404);
+    return;
+  }
+  res.json({ ok: true });
+}));
+
+// Manually fire a trigger now ("Run now" — an explicit test, sends real messages if linked).
+app.post('/api/agents/:id/triggers/:trgId/run', wrap(async (req, res, auth) => {
+  if (!state.getAgent(req.params.id, auth.tenantId)) {
+    res.sendStatus(404);
+    return;
+  }
+  const trigger = await state.runTriggerNow(req.params.id, auth.tenantId, req.params.trgId);
+  res.json({ trigger, fired: true });
+}));
+
+// AI "Add timed action" builder — a conversational flow that auto-builds capabilities, then a trigger.
+app.post('/api/agents/:id/triggers/start', wrap(async (_req, res, auth) => {
+  const r = state.startTriggerBuilder(_req.params.id, auth.tenantId, auth.username);
+  if (!r) {
+    res.sendStatus(404);
+    return;
+  }
+  res.json(r);
+}));
+
+app.post('/api/agents/:id/triggers/message', wrap(async (req, res, auth) => {
+  const { sessionId, text } = (req.body ?? {}) as { sessionId?: string; text?: string };
+  const userText = String(text ?? '').trim();
+  if (!userText) {
+    res.status(400).json({ error: 'empty message' });
+    return;
+  }
+  const r = await state.triggerBuilderMessage(String(sessionId), auth.username, userText);
+  if (!r) {
+    res.sendStatus(404);
+    return;
+  }
+  res.json(r);
+}));
+
+app.post('/api/agents/:id/triggers/propose', wrap(async (req, res, auth) => {
+  const { sessionId } = (req.body ?? {}) as { sessionId?: string };
+  const plan = await state.proposeTriggerPlan(String(sessionId), auth.username);
+  if (!plan) {
+    res.sendStatus(404);
+    return;
+  }
+  res.json({ plan });
+}));
+
+app.post('/api/agents/:id/triggers/apply', wrap(async (req, res, auth) => {
+  const { sessionId } = (req.body ?? {}) as { sessionId?: string };
+  const r = state.applyTriggerPlan(String(sessionId), auth.username);
+  if (!r) {
+    res.sendStatus(404);
+    return;
+  }
+  res.json(r);
 }));
 
 // --- Extend an existing agent: Context / Skills / Workflows ---

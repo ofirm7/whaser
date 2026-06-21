@@ -57,6 +57,7 @@
   .chatbadge { text-align:center; font-size:13px; color:var(--muted); }
   .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; padding:18px; z-index:1000; }
   .modal { width:400px; max-width:100%; margin:0; }
+  .modal.wide { width:560px; }
 </style>
 </head>
 <body>
@@ -205,7 +206,50 @@ const I18N = { he: {
     "typing…": "מקליד…",
     "I have enough to design your agent — or keep chatting to refine.": "יש לי מספיק כדי לעצב את הסוכן שלכם — או המשיכו לשוחח כדי לחדד.",
     "Designing your agent…": "מעצב את הסוכן שלכם…",
-    "Choose which WhatsApp chats this agent should answer, then publish.": "בחרו לאילו צ׳אטים ב-WhatsApp הסוכן יענה, ואז פרסמו."
+    "Choose which WhatsApp chats this agent should answer, then publish.": "בחרו לאילו צ׳אטים ב-WhatsApp הסוכן יענה, ואז פרסמו.",
+    "Active": "פעיל",
+    "Runs every": "רץ כל",
+    "Runs every {0}": "רץ כל {0}",
+    "Runs every {0} {1}": "רץ כל {0} {1}",
+    "second": "שנייה",
+    "seconds": "שניות",
+    "minute": "דקה",
+    "minutes": "דקות",
+    "hour": "שעה",
+    "hours": "שעות",
+    "day": "יום",
+    "days": "ימים",
+    "week": "שבוע",
+    "weeks": "שבועות",
+    "every {0} {1}": "כל {0} {1}",
+    "Add timed action": "הוספת פעולה מתוזמנת",
+    "Describe what the agent should do on a schedule. Whaser builds any tools it needs, then proposes the trigger.": "תארו מה הסוכן צריך לעשות לפי לוח זמנים. Whaser יבנה את הכלים שהוא צריך, ואז יציע את הטריגר.",
+    "Build this action": "בניית הפעולה",
+    "Designing this action…": "מעצב את הפעולה…",
+    "⚠️ When a trigger fires, it sends a REAL WhatsApp message to this agent's {0} chat(s).": "⚠️ כשטריגר מופעל, הוא שולח הודעת WhatsApp אמיתית ל-{0} צ׳אטים של הסוכן.",
+    "⚠️ No chats selected — fired actions are logged only (no real messages sent).": "⚠️ לא נבחרו צ׳אטים — פעולות שמופעלות רק נרשמות ביומן (לא נשלחות הודעות אמיתיות).",
+    "New capabilities to add": "יכולות חדשות להוספה",
+    "This trigger": "הטריגר הזה",
+    "Apply": "החלה",
+    "Applied — trigger created (disabled). Turn it on with Active.": "הוחל — הטריגר נוצר (מושבת). הפעילו אותו עם \"פעיל\".",
+    "⏰ Scheduled triggers": "⏰ טריגרים מתוזמנים",
+    "➕ Add timed action": "➕ הוספת פעולה מתוזמנת",
+    "Actions this agent runs on a schedule, all by itself.": "פעולות שהסוכן מריץ לפי לוח זמנים, באופן עצמאי.",
+    "Agent is paused — triggers will not run while paused.": "הסוכן מושהה — טריגרים לא ירוצו בזמן ההשהיה.",
+    "No scheduled triggers yet. Use ➕ Add timed action to create one.": "אין עדיין טריגרים מתוזמנים. השתמשו ב-➕ הוספת פעולה מתוזמנת כדי ליצור אחד.",
+    "Trigger error": "שגיאת טריגר",
+    "Last run: {0}{1}": "ריצה אחרונה: {0}{1}",
+    " · sent to {0} chat(s)": " · נשלח ל-{0} צ׳אטים",
+    "Last run: never": "ריצה אחרונה: מעולם לא",
+    "▶ Run now": "▶ הרצה עכשיו",
+    "✏️ Edit": "✏️ עריכה",
+    "🗑 Delete": "🗑 מחיקה",
+    "Enable scheduled trigger?": "להפעיל את הטריגר המתוזמן?",
+    "This will message {0} chat(s) {1}. Real WhatsApp messages will be sent.": "פעולה זו תשלח הודעה ל-{0} צ׳אטים {1}. יישלחו הודעות WhatsApp אמיתיות.",
+    "Delete trigger?": "למחוק את הטריגר?",
+    "This scheduled trigger will be removed. This can't be undone.": "הטריגר המתוזמן יוסר. לא ניתן לבטל פעולה זו.",
+    "Edit trigger": "עריכת טריגר",
+    "Save trigger": "שמירת טריגר"
   } };
 let lang = localStorage.getItem('whaser_lang') || 'en';
 function t(s){ const d = I18N[lang]; return (d && d[s] != null) ? d[s] : s; }
@@ -227,7 +271,19 @@ async function api(path, method='GET', body){
   return r.status === 204 ? null : r.json();
 }
 function logout(){ token=null; user=null; localStorage.removeItem('whaser_token'); localStorage.removeItem('whaser_user'); render(); }
-function esc(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Cadence units for scheduled triggers (singular/plural keys keep Hebrew agreement correct).
+const TIMING_UNITS = [
+  { v:'second', one:'second', many:'seconds' },
+  { v:'minute', one:'minute', many:'minutes' },
+  { v:'hour',   one:'hour',   many:'hours' },
+  { v:'day',    one:'day',    many:'days' },
+  { v:'week',   one:'week',   many:'weeks' },
+];
+function unitOf(u){ return TIMING_UNITS.find(x=>x.v===u) || TIMING_UNITS[1]; }
+function cadenceText(value, unit){ const u=unitOf(unit); return value===1 ? tf('Runs every {0}', t(u.one)) : tf('Runs every {0} {1}', value, t(u.many)); }
+function cadenceShort(value, unit){ const u=unitOf(unit); return tf('every {0} {1}', value, t(u.many)); }
 
 // Themed confirmation pop-up. Returns Promise<boolean> — true on confirm, false on cancel
 // (Cancel button, backdrop click, or Escape). Cancel is focused by default so a destructive
@@ -254,6 +310,57 @@ function confirmDialog({ title, message, confirmLabel, danger=false }){
     backdrop.appendChild(card); document.body.appendChild(backdrop);
     card.querySelector('[data-act=cancel]').focus();
   });
+}
+
+// AI "Add timed action" builder: a modal chat that designs the action, auto-builds the capabilities
+// the agent needs (tools/skills/workflows), then creates a DISABLED trigger for review.
+function openTriggerBuilder(agentId, agent){
+  const backdrop=$('<div class="modal-backdrop"></div>');
+  const card=$('<div class="card modal wide" role="dialog" aria-modal="true"></div>');
+  card.innerHTML = `<h2 style="margin-bottom:6px">${t('Add timed action')}</h2>
+    <div class="muted" style="margin-bottom:8px">${t('Describe what the agent should do on a schedule. Whaser builds any tools it needs, then proposes the trigger.')}</div>
+    <div class="chat" id="tb-chat" style="height:260px"></div>
+    <div class="composer"><input id="tb-msg" placeholder="${t('Tell me about your agent…')}"/><button class="primary" id="tb-send">${t('Send')}</button></div>
+    <div id="tb-actions" style="margin-top:10px"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="ghost" id="tb-close">${t('Cancel')}</button></div>`;
+  let done=false, sessionId=null, sending=false, buildShown=false;
+  const close=()=>{ if(done) return; done=true; _openDialogs.delete(close); document.removeEventListener('keydown', onKey); backdrop.remove(); };
+  const onKey=(e)=>{ if(e.key==='Escape') close(); };
+  document.addEventListener('keydown', onKey); _openDialogs.add(close);
+  backdrop.onclick=(e)=>{ if(e.target===backdrop) close(); };
+  backdrop.appendChild(card); document.body.appendChild(backdrop);
+  const chat=card.querySelector('#tb-chat'), input=card.querySelector('#tb-msg'), sendBtn=card.querySelector('#tb-send'), actions=card.querySelector('#tb-actions');
+  card.querySelector('#tb-close').onclick=close;
+  const addBub=(who,text)=>{ const b=$(`<div class="bub ${who}"></div>`); b.textContent=text; chat.appendChild(b); chat.scrollTop=chat.scrollHeight; };
+  const setBusy=(b)=>{ sending=b; input.disabled=b; sendBtn.disabled=b; };
+  (async()=>{ try{ const s=await api('/api/agents/'+agentId+'/triggers/start','POST'); sessionId=s.sessionId; addBub('bot', s.greeting); input.focus(); }
+    catch(e){ addBub('bot', tf('⚠ {0}', e.message)); } })();
+  const send=async()=>{ const text=input.value.trim(); if(!text||sending||!sessionId) return; input.value=''; addBub('me',text); setBusy(true);
+    const typing=$(`<div class="bub bot muted">${esc(t('typing…'))}</div>`); chat.appendChild(typing); chat.scrollTop=chat.scrollHeight;
+    try{ const r=await api('/api/agents/'+agentId+'/triggers/message','POST',{ sessionId, text }); typing.remove(); addBub('bot', r.reply); if(r.readyToBuild) showBuild(); }
+    catch(e){ typing.remove(); addBub('bot', tf('⚠ {0}', e.message)); }
+    setBusy(false); input.focus(); };
+  sendBtn.onclick=send; input.addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });
+  function showBuild(){ if(buildShown) return; buildShown=true;
+    actions.innerHTML=''; const b=$(`<button class="primary">${t('Build this action')}</button>`); b.onclick=()=>propose(b); actions.appendChild(b); }
+  async function propose(btn){ if(btn) btn.disabled=true;
+    actions.innerHTML=''; const box=$(`<div class="card" style="margin-top:8px;border-color:var(--accent)"><span class="muted">${t('Designing this action…')}</span></div>`); actions.appendChild(box);
+    try{ const r=await api('/api/agents/'+agentId+'/triggers/propose','POST',{ sessionId }); const plan=r.plan;
+      const caps=(plan.extensions||[]).map(ext=>`<div style="margin:4px 0"><span class="pill">${ext.kind==='skill'?'🧩':(ext.kind==='workflow'?'🤖':'📎')} ${esc(ext.kind)}</span> <span class="muted" dir="auto">${esc(ext.summary||'')}</span></div>`).join('');
+      const banner=(agent.listenChats||[]).length ? tf("⚠️ When a trigger fires, it sends a REAL WhatsApp message to this agent's {0} chat(s).", agent.listenChats.length) : t('⚠️ No chats selected — fired actions are logged only (no real messages sent).');
+      box.innerHTML = `${caps?`<b>${t('New capabilities to add')}</b>${caps}<div style="height:6px"></div>`:''}
+        <b>${t('This trigger')}</b>
+        <div class="muted" dir="auto" style="margin:4px 0">${esc(plan.trigger.prompt)}</div>
+        <div><span class="pill">⏰ ${esc(cadenceText(plan.trigger.value, plan.trigger.unit))}</span></div>
+        <div class="card" style="border-color:var(--danger);margin:8px 0">${banner}</div>`;
+      const ap=$(`<button class="primary">${t('Apply')}</button>`); ap.onclick=async()=>{ ap.disabled=true;
+        try{ await api('/api/agents/'+agentId+'/triggers/apply','POST',{ sessionId });
+          box.appendChild($(`<div class="ok" style="margin-top:8px">${t('Applied — trigger created (disabled). Turn it on with Active.')}</div>`));
+          setTimeout(()=>{ close(); if(view==='agent:'+agentId) render(); }, 900); }
+        catch(e){ box.appendChild($(`<div class="err" style="margin-top:8px">${esc(e.message)}</div>`)); ap.disabled=false; } };
+      box.appendChild(ap);
+    }catch(e){ box.innerHTML=`<div class="err">${esc(e.message)}</div>`; const rb=$(`<button class="primary" style="margin-top:8px">${t('Build this action')}</button>`); rb.onclick=()=>propose(rb); box.appendChild(rb); }
+  }
 }
 
 function render(){
@@ -431,6 +538,70 @@ async function AgentDetailView(wrap, id){
     catch(e){ alert(e.message); cw.disabled=false; } };
   wrap.appendChild(head);
 
+  // ⏰ Scheduled triggers — actions the agent runs automatically on a cadence (fires + sends to its chats).
+  {
+    const chatCount = (a.listenChats||[]).length;
+    const dangerBanner = chatCount
+      ? tf("⚠️ When a trigger fires, it sends a REAL WhatsApp message to this agent's {0} chat(s).", chatCount)
+      : t('⚠️ No chats selected — fired actions are logged only (no real messages sent).');
+    const tcard = $('<div class="card"></div>');
+    tcard.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">${t('⏰ Scheduled triggers')}</h2>
+        <button class="primary" id="addtrigger">${t('➕ Add timed action')}</button></div>
+      <div class="muted" style="margin:6px 0">${t('Actions this agent runs on a schedule, all by itself.')}</div>
+      <div class="card" style="border-color:var(--danger);margin:0 0 10px">${dangerBanner}</div>
+      ${a.status==='paused'?`<div class="muted" style="margin-bottom:8px">${t('Agent is paused — triggers will not run while paused.')}</div>`:''}
+      <div id="triglist"></div>`;
+    const list = tcard.querySelector('#triglist');
+    const triggers = a.triggers||[];
+    if (!triggers.length) list.innerHTML = `<div class="muted">${t('No scheduled triggers yet. Use ➕ Add timed action to create one.')}</div>`;
+    for (const trg of triggers){
+      const row = $('<div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px"></div>');
+      const badge = trg.lastStatus==='error' ? `<span class="badge paused">${t('Trigger error')}</span>` : (trg.enabled?`<span class="badge live">${t('Active')}</span>`:'');
+      const lastRun = trg.lastRunAt
+        ? tf('Last run: {0}{1}', new Date(trg.lastRunAt).toLocaleString(locale()), (trg.lastSentCount!=null?tf(' · sent to {0} chat(s)', trg.lastSentCount):''))
+        : t('Last run: never');
+      const errTail = (trg.lastStatus==='error'&&trg.lastError) ? (' · <span class="err">'+esc(tf('⚠ {0}', trg.lastError))+'</span>') : '';
+      row.innerHTML = `<div class="row" style="justify-content:space-between">
+          <label class="row" style="gap:6px;margin:0"><input type="checkbox" class="tg-on"${trg.enabled?' checked':''}/> <b dir="auto">${esc(trg.label)}</b></label>
+          ${badge}</div>
+        <div class="muted" style="margin-top:4px">${esc(cadenceText(trg.value, trg.unit))}</div>
+        <div class="muted" dir="auto" style="font-size:12.5px;margin-top:4px">${esc(trg.prompt.slice(0,160))}</div>
+        <div class="muted" dir="auto" style="font-size:12px;margin-top:4px">${esc(lastRun)}${errTail}</div>
+        <div class="row" style="margin-top:8px"><button class="ghost tg-run">${t('▶ Run now')}</button>
+          <button class="ghost tg-edit">${t('✏️ Edit')}</button>
+          <button class="danger tg-del" style="margin-inline-start:auto">${t('🗑 Delete')}</button></div>
+        <div class="tg-editbox"></div>`;
+      const on=row.querySelector('.tg-on'), runB=row.querySelector('.tg-run'), editB=row.querySelector('.tg-edit'), delB=row.querySelector('.tg-del'), editBox=row.querySelector('.tg-editbox');
+      on.onchange=async()=>{ const enabling=on.checked;
+        if (enabling && a.status==='live' && chatCount){
+          const ok=await confirmDialog({ title:t('Enable scheduled trigger?'), message:tf('This will message {0} chat(s) {1}. Real WhatsApp messages will be sent.', chatCount, cadenceShort(trg.value,trg.unit)), confirmLabel:t('Active'), danger:true });
+          if(!ok){ on.checked=false; return; }
+        }
+        try{ await api('/api/agents/'+id+'/triggers/'+trg.id,'PATCH',{ enabled:enabling }); render(); }
+        catch(e){ alert(e.message); on.checked=!enabling; } };
+      runB.onclick=async()=>{ runB.disabled=true; try{ await api('/api/agents/'+id+'/triggers/'+trg.id+'/run','POST'); render(); }catch(e){ alert(e.message); runB.disabled=false; } };
+      delB.onclick=async()=>{ const ok=await confirmDialog({ title:t('Delete trigger?'), message:t("This scheduled trigger will be removed. This can't be undone."), confirmLabel:t('🗑 Delete'), danger:true }); if(!ok) return;
+        try{ await api('/api/agents/'+id+'/triggers/'+trg.id,'DELETE'); render(); }catch(e){ alert(e.message); } };
+      editB.onclick=()=>{ if(editBox.dataset.open){ editBox.innerHTML=''; delete editBox.dataset.open; return; } editBox.dataset.open='1';
+        editBox.innerHTML = `<div class="card" style="margin-top:8px">
+          <label>${t('Edit trigger')}</label>
+          <input class="te-label" value="${esc(trg.label)}"/>
+          <textarea class="te-prompt" rows="2" style="margin-top:6px"></textarea>
+          <div class="row" style="margin-top:6px"><span class="muted">${t('Runs every')}</span>
+            <input class="te-val" type="number" min="1" max="9999" step="1" value="${esc(String(trg.value))}" style="width:74px"/>
+            <select class="te-unit">${TIMING_UNITS.map(u=>`<option value="${u.v}"${u.v===trg.unit?' selected':''}>${esc(t(u.many))}</option>`).join('')}</select>
+            <button class="primary te-save" style="margin-inline-start:auto">${t('Save trigger')}</button></div></div>`;
+        editBox.querySelector('.te-prompt').value=trg.prompt;
+        const sv=editBox.querySelector('.te-save');
+        sv.onclick=async()=>{ sv.disabled=true;
+          const body={ label:editBox.querySelector('.te-label').value, prompt:editBox.querySelector('.te-prompt').value, value:Number(editBox.querySelector('.te-val').value), unit:editBox.querySelector('.te-unit').value };
+          try{ await api('/api/agents/'+id+'/triggers/'+trg.id,'PATCH',body); render(); }catch(e){ alert(e.message); sv.disabled=false; } }; };
+      list.appendChild(row);
+    }
+    tcard.querySelector('#addtrigger').onclick=()=> openTriggerBuilder(id, a);
+    wrap.appendChild(tcard);
+  }
+
   // WhatsApp simulator
   const sim = $('<div class="card"></div>');
   sim.innerHTML = `<h2>${t('WhatsApp simulator')}</h2><div class="muted" style="margin-bottom:8px">${t('Sends a real inbound message through the gateway → resolver → cost/abuse breaker → agent runtime → reply. (LLM + WhatsApp transport are stubbed locally.)')}</div>
@@ -575,7 +746,7 @@ async function ActivityView(wrap){
     if(!r.events.length){ card.innerHTML=`<span class="muted">${t('No activity yet. Use an agent\'s simulator, or message a linked chat.')}</span>`; return; }
     card.innerHTML = r.events.map(e=>{
       const when=new Date(e.ts).toLocaleTimeString(locale());
-      const ch = e.channel==='whatsapp'?'📱':'🧪';
+      const ch = e.channel==='whatsapp'?'📱':(e.channel==='timer'?'⏰':'🧪');
       const route = e.blocked ? '<span class="err">⛔ '+esc(e.blocked)+'</span>' : (e.routedTo && e.routedTo!=='default' ? '🧭 '+esc(e.routedTo) : `<span class="muted">${t('default')}</span>`);
       const reply = e.reply ? esc(e.reply.slice(0,200)) : `<span class="muted">${t('(no reply)')}</span>`;
       return `<div style="border-bottom:1px solid var(--line);padding:8px 0">

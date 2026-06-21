@@ -15,6 +15,7 @@ import { StubLlmClient, StubWorkflowLlm, StubTuner, StubExtender } from './stubs
 import { makeAnthropicLike, AnthropicWorkflowLlm } from './anthropic';
 import { WorkflowAgentRuntime } from './workflowRuntime';
 import { BaileysChannel } from './baileys';
+import { TriggerScheduler } from './scheduler';
 import { loadAgents, saveAgents } from './persistence';
 import { readdirSync, readFileSync, existsSync, statSync, mkdirSync, renameSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -37,13 +38,58 @@ export interface ActivityEvent {
   tenantId: string;
   agentId: string;
   agentName: string;
-  channel: 'sim' | 'whatsapp';
+  channel: 'sim' | 'whatsapp' | 'timer';
   chatId: string | null;
   from: string;
   text: string;
   routedTo: string | null;
   reply: string | null;
   blocked: string | null;
+}
+
+/** Wall-clock ms per cadence unit. */
+const UNIT_MS = { second: 1e3, minute: 6e4, hour: 36e5, day: 864e5, week: 6048e5 } as const;
+export type TimeUnit = keyof typeof UNIT_MS;
+/** Floor enforced at FIRE time: 'second' stays a legal unit but a trigger never fires faster than this. */
+export const MIN_INTERVAL_MS = 30_000;
+/** Max chats a single fire fans out to (outbound safety cap). */
+const MAX_TRIGGER_CHATS = 20;
+/** Per-tenant successful-fire circuit breaker per UTC day. */
+export const DAILY_FIRE_BUDGET = 500;
+
+/** A scheduled action the agent runs automatically on a cadence (sends to its chats + logs it). */
+export interface AgentTrigger {
+  id: string;
+  label: string;
+  /** The instruction run through the agent each time it fires. */
+  prompt: string;
+  enabled: boolean;
+  value: number;
+  unit: TimeUnit;
+  /** Optional link to the spec tool that seeded this trigger (isTimedTool hint). */
+  toolName?: string;
+  lastRunAt: number | null;
+  lastStatus: 'ok' | 'error' | 'skipped' | null;
+  lastError: string | null;
+  lastSentCount: number | null;
+  consecutiveErrors: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** The wall-clock interval of a trigger in ms (before the MIN_INTERVAL floor / backoff). */
+export function intervalMs(t: { value: number; unit: TimeUnit }): number {
+  return t.value * UNIT_MS[t.unit];
+}
+
+/** A spec tool reads as time-based when it's side-effecting AND scheduled/recurring — a UI hint only. */
+export function isTimedTool(tool: { name?: string; description?: string; side_effecting?: boolean }): boolean {
+  return (
+    tool?.side_effecting === true &&
+    /schedul|remind|recurr|every\s+(sec|min|hour|day|week|morning)|timed|timer|periodic|follow.?up|cron|interval|cadence|digest|poll/i.test(
+      `${tool.name ?? ''} ${tool.description ?? ''}`,
+    )
+  );
 }
 
 export interface StoredAgent {
@@ -55,6 +101,8 @@ export interface StoredAgent {
   phoneNumberId: string;
   /** WhatsApp chats this agent listens on (allow-list). Empty = simulator-only. */
   listenChats: ChatRef[];
+  /** Scheduled actions that fire automatically on a cadence. Absent until the owner adds one. */
+  triggers?: AgentTrigger[];
   createdAt: number;
   lastActivityAt: number | null;
 }
@@ -80,6 +128,26 @@ export interface WizardSession {
   finalizeResult?: Awaited<ReturnType<AgentBuilder['finalize']>>;
 }
 
+/** A trigger to create (cadence + action), plus capabilities to add to the agent first. */
+export interface TriggerProposal {
+  trigger: { label: string; prompt: string; value: number; unit: TimeUnit };
+  extensions: SpecExtension[];
+}
+
+/** A scoped conversation for designing one timed action for an existing agent. */
+export interface TriggerSession {
+  id: string;
+  ownerUsername: string;
+  tenantId: string;
+  agentId: string;
+  messages: InterviewTurn[];
+  plan?: TriggerProposal;
+}
+
+const TRIGGER_BUILDER_GREETING =
+  "Let's set up an action this agent runs automatically on a schedule. Tell me what it should do and how " +
+  "often (e.g. \"every morning\", \"every 2 hours\"). I'll build any tools or skills it needs, then create the trigger.";
+
 export class AppState {
   /** 'claude' when ANTHROPIC_API_KEY is set, else 'stub'. */
   readonly mode: RuntimeModeName;
@@ -87,6 +155,7 @@ export class AppState {
   private readonly agents = new Map<string, StoredAgent>();
   private readonly catalog = new Map<string, CatalogEntry>();
   private readonly sessions = new Map<string, WizardSession>();
+  private readonly triggerSessions = new Map<string, TriggerSession>();
   /** Monotonic source for SIM phone numbers — never reuses a number even if an agent is removed. */
   private simSeq = 0;
   private readonly resolver = new InMemoryAgentResolver();
@@ -96,6 +165,9 @@ export class AppState {
   private readonly tuner: Tuner;
   private readonly extender: Extender;
   private readonly handler: InboundHandler;
+  private readonly scheduler: TriggerScheduler;
+  /** Trigger ids currently firing — shared overlap guard for the scheduler AND manual "Run now". */
+  private readonly firing = new Set<string>();
   private readonly lastBlock = new Map<string, string>();
   private readonly transcripts = new Map<string, TranscriptTurn[]>();
   private readonly activity: ActivityEvent[] = [];
@@ -133,6 +205,7 @@ export class AppState {
     // Persisted agents survive restarts: load them + re-bind their SIM number and chat allow-list
     // (chat keys are tenant-scoped so the same contact in two users' accounts can't collide).
     for (const a of loadAgents()) {
+      delete (a as { timing?: unknown }).timing; // drop the superseded per-tool timing field (now: triggers)
       this.agents.set(a.id, a);
       this.resolver.bind(a.phoneNumberId, { agentId: a.id, tenantId: a.tenantId });
       for (const c of a.listenChats) this.resolver.bind(this.chatKey(a.tenantId, c.id), { agentId: a.id, tenantId: a.tenantId });
@@ -162,6 +235,11 @@ export class AppState {
 
     // Load the global agents-catalog from committed seed files (once, at startup).
     this.loadCatalog();
+
+    // Auto-fire scheduled triggers (started last, after agents are rehydrated). Disabled triggers
+    // never fire, so this is dormant until an owner enables one.
+    this.scheduler = new TriggerScheduler(this);
+    this.scheduler.start();
   }
 
   // --- Real WhatsApp wiring (assigned in the constructor when env is present) ---
@@ -317,6 +395,213 @@ export class AppState {
     for (const c of chats) this.resolver.bind(this.chatKey(tenantId, c.id), { agentId: agent.id, tenantId });
     this.persist();
     return agent;
+  }
+
+  // --- Scheduled triggers (auto-firing timed actions) ---
+
+  /** Every agent across tenants — the scheduler iterates these each tick. */
+  eachAgent(): StoredAgent[] {
+    return [...this.agents.values()];
+  }
+
+  private normalizeUnit(u: unknown): TimeUnit {
+    const UNITS: readonly string[] = ['second', 'minute', 'hour', 'day', 'week'];
+    return UNITS.includes(u as string) ? (u as TimeUnit) : 'minute';
+  }
+
+  private clampInterval(v: unknown): number {
+    return Math.max(1, Math.min(9999, Math.round(Number(v) || 1)));
+  }
+
+  /** Create a scheduled trigger. ALWAYS created disabled — the owner enables it explicitly. */
+  addTrigger(agentId: string, tenantId: string, cfg: { label?: unknown; prompt?: unknown; value?: unknown; unit?: unknown; enabled?: unknown; toolName?: unknown }): AgentTrigger {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    const prompt = String(cfg.prompt ?? '').trim();
+    if (!prompt) throw new Error('a trigger needs an action prompt');
+    const now = this.now();
+    const trigger: AgentTrigger = {
+      id: this.id('trg'),
+      label: String(cfg.label ?? '').trim() || 'Timed action',
+      prompt,
+      enabled: cfg.enabled === true,
+      value: this.clampInterval(cfg.value),
+      unit: this.normalizeUnit(cfg.unit),
+      toolName: typeof cfg.toolName === 'string' ? cfg.toolName : undefined,
+      lastRunAt: null,
+      lastStatus: null,
+      lastError: null,
+      lastSentCount: null,
+      consecutiveErrors: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    agent.triggers = [...(agent.triggers ?? []), trigger];
+    this.persist();
+    return trigger;
+  }
+
+  /** Patch a trigger (partial). Re-validates value/unit; keeps label/prompt non-empty when provided. */
+  updateTrigger(agentId: string, tenantId: string, trgId: string, patch: { label?: unknown; prompt?: unknown; value?: unknown; unit?: unknown; enabled?: unknown }): AgentTrigger {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    const trigger = (agent.triggers ?? []).find((t) => t.id === trgId);
+    if (!trigger) throw new Error('trigger not found');
+    if (patch.label !== undefined) { const l = String(patch.label).trim(); if (l) trigger.label = l; }
+    if (patch.prompt !== undefined) { const p = String(patch.prompt).trim(); if (p) trigger.prompt = p; }
+    if (patch.value !== undefined) trigger.value = this.clampInterval(patch.value);
+    if (patch.unit !== undefined) trigger.unit = this.normalizeUnit(patch.unit);
+    if (patch.enabled !== undefined) {
+      const wasEnabled = trigger.enabled;
+      trigger.enabled = patch.enabled === true;
+      // Anchor the cadence at enable time so a just-enabled trigger waits one full interval (no instant fire).
+      if (!wasEnabled && trigger.enabled) trigger.lastRunAt = this.now();
+    }
+    trigger.updatedAt = this.now();
+    this.persist();
+    return trigger;
+  }
+
+  /** Delete a trigger; returns true if it existed. */
+  deleteTrigger(agentId: string, tenantId: string, trgId: string): boolean {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    const before = (agent.triggers ?? []).length;
+    agent.triggers = (agent.triggers ?? []).filter((t) => t.id !== trgId);
+    if (agent.triggers.length === before) return false;
+    this.persist();
+    return true;
+  }
+
+  /**
+   * Fire one trigger: run its action through the agent runtime, send the result to the agent's
+   * WhatsApp chats (when linked), and log a 'timer' activity event. Records run status + backoff.
+   * The scheduler calls this for due, enabled, live triggers; `force` is for the manual "Run now".
+   */
+  /** True while this trigger is mid-fire (the scheduler checks this to avoid overlapping/double-counting). */
+  isFiring(trgId: string): boolean {
+    return this.firing.has(trgId);
+  }
+
+  async fireTrigger(agentId: string, trigger: AgentTrigger, opts?: { force?: boolean }): Promise<void> {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+    if (!opts?.force && (agent.status !== 'live' || !trigger.enabled)) return;
+    if (this.firing.has(trigger.id)) return; // overlap guard: a fire (scheduled or manual) is already in flight
+    this.firing.add(trigger.id);
+    try {
+      const out = await this.runtime.complete({ agentId, messages: [{ role: 'user', content: trigger.prompt }] });
+      const text = (out.text ?? '').trim();
+      const ch = this.channels.get(agent.tenantId);
+      const connected = ch?.getStatus().status === 'connected';
+      let sent = 0;
+      if (text && connected) {
+        for (const c of agent.listenChats.slice(0, MAX_TRIGGER_CHATS)) {
+          if (await ch!.sendText(c.id, text)) sent++;
+        }
+      }
+      this.logActivity({
+        ts: this.now(), tenantId: agent.tenantId, agentId, agentName: agent.spec.agent_name,
+        channel: 'timer', chatId: null, from: `trigger:${trigger.label}`, text: trigger.prompt,
+        routedTo: this.runtime.lastRoutedTo, reply: text || null,
+        blocked: connected ? null : (agent.listenChats.length ? 'not_linked' : 'sim_only'),
+      });
+      agent.lastActivityAt = this.now();
+      trigger.lastRunAt = this.now();
+      trigger.lastStatus = 'ok';
+      trigger.lastError = null;
+      trigger.lastSentCount = sent;
+      trigger.consecutiveErrors = 0;
+    } catch (e) {
+      trigger.lastStatus = 'error';
+      trigger.lastError = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+      trigger.consecutiveErrors = (trigger.consecutiveErrors ?? 0) + 1;
+      trigger.lastRunAt = this.now();
+      trigger.lastSentCount = null;
+    } finally {
+      trigger.updatedAt = this.now();
+      this.firing.delete(trigger.id);
+      this.persist();
+    }
+  }
+
+  /** Manually fire a trigger now ("Run now") — an explicit owner action, so it ignores enabled/live gates. */
+  async runTriggerNow(agentId: string, tenantId: string, trgId: string): Promise<AgentTrigger> {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    const trigger = (agent.triggers ?? []).find((t) => t.id === trgId);
+    if (!trigger) throw new Error('trigger not found');
+    await this.fireTrigger(agentId, trigger, { force: true });
+    return trigger;
+  }
+
+  // --- AI "add timed action" builder: conversational, auto-builds capabilities, then creates a trigger ---
+
+  startTriggerBuilder(agentId: string, tenantId: string, owner: string): { sessionId: string; greeting: string } | null {
+    if (!this.getAgent(agentId, tenantId)) return null;
+    const id = this.id('tb');
+    this.triggerSessions.set(id, { id, ownerUsername: owner, tenantId, agentId, messages: [] });
+    return { sessionId: id, greeting: TRIGGER_BUILDER_GREETING };
+  }
+
+  async triggerBuilderMessage(sessionId: string, owner: string, text: string): Promise<{ reply: string; readyToBuild: boolean } | null> {
+    const s = this.triggerSessions.get(sessionId);
+    if (!s || s.ownerUsername !== owner) return null;
+    const agent = this.getAgent(s.agentId, s.tenantId);
+    if (!agent) return null;
+    s.messages.push({ role: 'user', content: text });
+    const r = await this.builder.interviewTrigger(agent.spec, s.messages);
+    s.messages.push({ role: 'assistant', content: r.reply });
+    return r;
+  }
+
+  /** Synthesize the plan + materialize each capability request into a reviewable SpecExtension (no side effects). */
+  async proposeTriggerPlan(sessionId: string, owner: string): Promise<TriggerProposal | null> {
+    const s = this.triggerSessions.get(sessionId);
+    if (!s || s.ownerUsername !== owner) return null;
+    const agent = this.getAgent(s.agentId, s.tenantId);
+    if (!agent) return null;
+    const plan = await this.builder.synthesizeTrigger(agent.spec, s.messages);
+    const extensions: SpecExtension[] = [];
+    for (const req of plan.capabilityRequests ?? []) {
+      if ((req.kind !== 'context' && req.kind !== 'skill' && req.kind !== 'workflow') || !String(req.instruction ?? '').trim()) continue;
+      extensions.push(await this.extender.propose({ spec: agent.spec, kind: req.kind, instruction: String(req.instruction), prior: null }));
+    }
+    s.plan = {
+      trigger: {
+        label: String(plan.label ?? '').trim() || 'Timed action',
+        prompt: String(plan.prompt ?? '').trim() || 'Send a short update.',
+        value: Math.max(1, Math.min(9999, Math.round(Number(plan.value) || 1))),
+        unit: this.normalizeUnit(plan.unit),
+      },
+      extensions,
+    };
+    return s.plan;
+  }
+
+  /** Apply the proposed capabilities (validated via applyExtension), then create the trigger (DISABLED).
+   *  Atomic: if any capability fails validation, the spec is rolled back so no partial state is persisted. */
+  applyTriggerPlan(sessionId: string, owner: string): { agentId: string; version: number; trigger: AgentTrigger; appliedCapabilities: number } | null {
+    const s = this.triggerSessions.get(sessionId);
+    if (!s || s.ownerUsername !== owner) return null;
+    const agent = this.getAgent(s.agentId, s.tenantId);
+    if (!agent) return null;
+    if (!s.plan) throw new Error('no proposed plan — propose first');
+    const before = JSON.parse(JSON.stringify(agent.spec)) as AgentSpec; // snapshot for rollback
+    try {
+      let applied = 0;
+      for (const ext of s.plan.extensions) {
+        this.applyExtension(s.agentId, s.tenantId, ext); // validates + consistency-checks + version-bumps; throws on bad
+        applied++;
+      }
+      const trigger = this.addTrigger(s.agentId, s.tenantId, { ...s.plan.trigger, enabled: false });
+      this.triggerSessions.delete(sessionId);
+      return { agentId: s.agentId, version: agent.spec.version, trigger, appliedCapabilities: applied };
+    } catch (e) {
+      agent.spec = before; // roll back any partially-applied capabilities
+      this.persist();
+      throw e;
+    }
   }
 
   private id(prefix: string): string {

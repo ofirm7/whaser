@@ -1,4 +1,4 @@
-import type { LlmClient, SlotSpec, SlotValue, SlotValues, AgentSpec, InterviewTurn } from '../../../packages/agent-builder/src/index';
+import type { LlmClient, SlotSpec, SlotValue, SlotValues, AgentSpec, InterviewTurn, TriggerPlan } from '../../../packages/agent-builder/src/index';
 import type { WorkflowLlm, WorkflowRuntimeMessage } from '../../../packages/agent-builder/src/index';
 import type { Tuner, TranscriptTurn, TuningResult, TuningSuggestion } from '../../../packages/agent-builder/src/index';
 import type { Extender, ExtensionKind, SpecExtension } from '../../../packages/agent-builder/src/index';
@@ -131,6 +131,32 @@ export class StubLlmClient implements LlmClient {
       needs_sandbox: tools.some((t) => t.side_effecting),
     };
     return spec;
+  }
+
+  // --- Timed-action (trigger) builder stubs (deterministic; no Anthropic key) ---
+
+  async interviewTrigger({ messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }> {
+    const userTurns = messages.filter((m) => m.role === 'user').length;
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+    const demoNote = ' (Demo — connect an Anthropic key for a real action designer.)';
+    if (/\b(build it|that'?s all|go ahead|create it|let'?s build|i'?m done|do it)\b/i.test(lastUser)) {
+      return { reply: 'Got it — enough to set up this timed action. Click "Build this action" to review it.' + demoNote, readyToBuild: true };
+    }
+    if (userTurns <= 1) {
+      return { reply: 'What should the agent do each time it fires, and how often (e.g. "every 1 hour", "every 2 days")?' + demoNote, readyToBuild: false };
+    }
+    return { reply: 'Great — that\'s enough. Click "Build this action" to review it, or add more detail.' + demoNote, readyToBuild: true };
+  }
+
+  async synthesizeTrigger({ messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<TriggerPlan> {
+    const userText = messages.filter((m) => m.role === 'user').map((m) => m.content).join('\n');
+    const last = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+    const m = userText.match(/every\s+(\d+)\s*(second|minute|hour|day|week)s?/i);
+    const value = m ? Math.max(1, Math.min(9999, parseInt(m[1], 10))) : 1;
+    const unit = (m ? m[2].toLowerCase() : 'day') as TriggerPlan['unit'];
+    const firstUser = messages.find((mm) => mm.role === 'user')?.content ?? 'Timed action';
+    const label = firstUser.trim().split(/\s+/).slice(0, 5).join(' ').slice(0, 40) || 'Timed action';
+    return { label, prompt: (last || firstUser).trim().slice(0, 400) || 'Send a short update.', value, unit, capabilityRequests: [] };
   }
 }
 

@@ -120,6 +120,23 @@ export class BaileysChannel {
     return { status: this.status, qrDataUrl: this.qrDataUrl, me: this.me };
   }
 
+  /** Owner-initiated outbound (used by scheduled triggers). Returns false (no throw) when not linked.
+   *  Records the sent id in sentIds so the echoed message is ignored by the inbound loop-guard. */
+  async sendText(jid: string, text: string): Promise<boolean> {
+    if (!this.sock || this.status !== 'connected') return false;
+    const body = (text ?? '').trim();
+    if (!body) return false;
+    try {
+      const sent = await this.sock.sendMessage(jid, { text: body });
+      const sid = sent?.key?.id;
+      if (sid) this.sentIds.add(sid);
+      return true;
+    } catch (e) {
+      console.error('[baileys] sendText failed', jid, e);
+      return false;
+    }
+  }
+
   private numberOf(jid: string): string {
     return jid.split('@')[0].split(':')[0];
   }

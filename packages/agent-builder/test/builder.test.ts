@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { AgentBuilder } from '../src/builder';
-import type { LlmClient, InterviewTurn } from '../src/llm';
+import type { LlmClient, InterviewTurn, TriggerPlan } from '../src/llm';
+import type { AgentSpec } from '../src/schema';
 import type { SlotSpec, SlotValue, SlotValues } from '../src/slots';
 import { SLOTS } from '../src/slots';
 import { validSpec } from './fixtures';
@@ -20,6 +21,12 @@ class MockLlm implements LlmClient {
   }
   async synthesizeFromConversation(): Promise<unknown> {
     return this.specToReturn;
+  }
+  async interviewTrigger({ messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }> {
+    return { reply: `trigger ${messages.length}`, readyToBuild: messages.length >= 2 };
+  }
+  async synthesizeTrigger(): Promise<TriggerPlan> {
+    return { label: 'Daily ping', prompt: 'Send a daily ping.', value: 1, unit: 'day', capabilityRequests: [] };
   }
 }
 

@@ -1,4 +1,4 @@
-import type { LlmClient, InterviewTurn } from './llm';
+import type { LlmClient, InterviewTurn, TriggerPlan } from './llm';
 import type { SlotValues } from './slots';
 import type { AgentSpec } from './schema';
 import type { ConsistencyIssue } from './consistency';
@@ -71,6 +71,18 @@ export class AgentBuilder {
   /** Synthesize the AgentSpec from the whole interview transcript, then validate + consistency-check. */
   async finalizeInterview(messages: InterviewTurn[]): Promise<FinalizeResult> {
     return this.check(await this.llm.synthesizeFromConversation({ messages }));
+  }
+
+  // --- Timed-action (trigger) builder for an existing agent ---
+
+  /** One interviewer turn while designing a timed action for an existing agent. */
+  async interviewTrigger(spec: AgentSpec, messages: InterviewTurn[]): Promise<{ reply: string; readyToBuild: boolean }> {
+    return this.llm.interviewTrigger({ spec, messages });
+  }
+
+  /** Synthesize the timed-action plan (label, action prompt, cadence, capability requests). */
+  async synthesizeTrigger(spec: AgentSpec, messages: InterviewTurn[]): Promise<TriggerPlan> {
+    return this.llm.synthesizeTrigger({ spec, messages });
   }
 
   /** Validate + consistency-check a synthesized spec into a FinalizeResult. */

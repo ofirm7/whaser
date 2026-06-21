@@ -1,4 +1,5 @@
 import type { SlotSpec, SlotValue, SlotValues } from './slots';
+import type { AgentSpec } from './schema';
 import { AGENT_SPEC_SCHEMA } from './schema';
 
 /**
@@ -9,6 +10,15 @@ import { AGENT_SPEC_SCHEMA } from './schema';
 export interface InterviewTurn {
   role: 'user' | 'assistant';
   content: string;
+}
+
+/** Output of the timed-action builder: the trigger fields + any capabilities the agent needs built. */
+export interface TriggerPlan {
+  label: string;
+  prompt: string;
+  value: number;
+  unit: 'second' | 'minute' | 'hour' | 'day' | 'week';
+  capabilityRequests: { kind: 'context' | 'skill' | 'workflow'; instruction: string }[];
 }
 
 export interface LlmClient {
@@ -23,6 +33,10 @@ export interface LlmClient {
   interview(args: { messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }>;
   /** Synthesize a full AgentSpec from the whole interview transcript (structured output). */
   synthesizeFromConversation(args: { messages: InterviewTurn[] }): Promise<unknown>;
+  /** One interviewer turn for designing a timed action for an EXISTING agent (spec-aware). */
+  interviewTrigger(args: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }>;
+  /** Synthesize a timed-action plan (label, action prompt, cadence, capability requests) from the chat. */
+  synthesizeTrigger(args: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<TriggerPlan>;
 }
 
 // --- Minimal Anthropic Messages surface (so the SDK can be injected/cast, and faked in tests) ---
@@ -121,6 +135,48 @@ const SYNTH_CONV_SYSTEM = [
   'escalate to a human. version=1. needs_sandbox=true only if any tool is side_effecting. model_assignment',
   'defaults to claude-sonnet-4-6; use claude-opus-4-8 only if the goal needs hard reasoning.',
 ].join(' ');
+
+const TRIGGER_INTERVIEW_SYSTEM = [
+  'You help the owner add an automatic, recurring TIMED ACTION to an EXISTING WhatsApp agent (its current',
+  'AgentSpec is provided). The action fires on a schedule with no inbound message, and its output is sent to',
+  "the agent's chats. Through a short chat, figure out: WHAT the agent should do each time it fires (a clear",
+  'imperative instruction), HOW OFTEN (every N seconds/minutes/hours/days/weeks), and whether it needs NEW',
+  'capabilities it does not already have (a tool, a skill, or a workflow). Only propose capabilities the spec',
+  'lacks. Ask ONE short question at a time and bias to ready_to_build within 2–3 turns; if the user says to',
+  'build it, set ready_to_build=true immediately. Reply ONLY by calling the `respond` tool, in the user\'s language.',
+].join(' ');
+
+const TRIGGER_SYNTH_SYSTEM = [
+  'Convert the conversation into a TIMED-ACTION plan for the given agent. Output: a short label; an imperative',
+  'prompt the agent runs each time it fires; a value+unit cadence; and capabilityRequests for any capability the',
+  'agent still needs — each {kind: "context"|"skill"|"workflow", instruction: "<what to build>"}. Use "skill" for',
+  'know-how/procedures, "context" for reference knowledge, "workflow" for a new tool/sub-agent. If the agent',
+  'already has everything it needs, capabilityRequests MUST be []. Keep the prompt concrete and self-contained.',
+].join(' ');
+
+const TRIGGER_PLAN_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['label', 'prompt', 'value', 'unit', 'capabilityRequests'],
+  properties: {
+    label: { type: 'string' },
+    prompt: { type: 'string' },
+    value: { type: 'integer' },
+    unit: { type: 'string', enum: ['second', 'minute', 'hour', 'day', 'week'] },
+    capabilityRequests: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'instruction'],
+        properties: {
+          kind: { type: 'string', enum: ['context', 'skill', 'workflow'] },
+          instruction: { type: 'string' },
+        },
+      },
+    },
+  },
+};
 
 /** Drives Anthropic Claude. Inject a real SDK instance (cast to AnthropicLike) or a fake. */
 export class AnthropicLlmClient implements LlmClient {
@@ -229,5 +285,51 @@ export class AnthropicLlmClient implements LlmClient {
     const text = res.content.find((b) => b.type === 'text')?.text;
     if (!text) throw new Error('Synthesis returned no content');
     return JSON.parse(text);
+  }
+
+  async interviewTrigger({ spec, messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }> {
+    const tool = {
+      name: 'respond',
+      description: 'Send your next message to the user and report whether you have enough to build the timed action.',
+      strict: true,
+      input_schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['reply', 'ready_to_build'],
+        properties: {
+          reply: { type: 'string', description: 'Your next message to the user (short, one focused question).' },
+          ready_to_build: { type: 'boolean', description: 'True once you know what to do, how often, and any new capabilities needed.' },
+        },
+      },
+    };
+    const res = await this.client.messages.create({
+      model: this.models.extract,
+      max_tokens: 1024,
+      system: `${TRIGGER_INTERVIEW_SYSTEM}\n\nCurrent AgentSpec (JSON):\n${JSON.stringify(spec)}`,
+      tools: [tool],
+      tool_choice: { type: 'tool', name: 'respond' },
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    });
+    if (res.stop_reason === 'refusal') throw new Error('Model refused to continue the interview');
+    const input = res.content.find((b) => b.type === 'tool_use')?.input;
+    const reply = typeof input?.reply === 'string' ? input.reply : '';
+    if (!reply) throw new Error('Interviewer returned no message');
+    return { reply, readyToBuild: input?.ready_to_build === true };
+  }
+
+  async synthesizeTrigger({ spec, messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<TriggerPlan> {
+    const transcript = messages.map((m) => `${m.role === 'assistant' ? 'Designer' : 'User'}: ${m.content}`).join('\n');
+    const res = await this.client.messages.create({
+      model: this.models.synthesize,
+      max_tokens: 2048,
+      thinking: { type: 'adaptive' },
+      output_config: { format: { type: 'json_schema', schema: TRIGGER_PLAN_SCHEMA } },
+      system: `${TRIGGER_SYNTH_SYSTEM}\n\nCurrent AgentSpec (JSON):\n${JSON.stringify(spec)}`,
+      messages: [{ role: 'user', content: `Conversation:\n${transcript}\n\nProduce the timed-action plan.` }],
+    });
+    if (res.stop_reason === 'refusal') throw new Error('Model refused to plan the timed action');
+    const text = res.content.find((b) => b.type === 'text')?.text;
+    if (!text) throw new Error('Trigger planning returned no content');
+    return JSON.parse(text) as TriggerPlan;
   }
 }
