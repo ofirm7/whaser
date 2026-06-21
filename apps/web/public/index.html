@@ -502,6 +502,7 @@ async function AgentsView(wrap){
       card.innerHTML = `<div class="row" style="justify-content:space-between"><b>${esc(a.name)}</b>
         <span class="badge ${a.status==='live'?'live':'paused'}">${t(a.status)}</span></div>
         <div class="muted" style="margin:6px 0">${esc(a.goal)}</div>
+        <div><span class="pill">${esc(a.tone)}</span><span class="pill">${esc(a.model)}</span><span class="pill">📱 ${esc(a.phoneNumberId)}</span></div>
         <div class="muted" style="margin-top:8px;font-size:12.5px">${tf('Last activity: {0}', a.lastActivityAt? new Date(a.lastActivityAt).toLocaleString(locale()):'—')}</div>`;
       card.onclick = ()=>{ view='agent:'+a.id; render(); };
       grid.appendChild(card);
@@ -549,10 +550,6 @@ async function AgentDetailView(wrap, id){
   head.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(a.name)} <span class="muted" style="font-size:13px">v${a.version}</span></h2>
     <span class="badge ${a.status==='live'?'live':'paused'}">${t(a.status)}</span></div>
     <div class="muted">${esc(a.goal)}</div>
-    <div style="margin-top:8px">${a.spec.in_scope_topics.map(t=>`<span class="pill">✓ ${esc(t)}</span>`).join('')}
-      ${a.spec.out_of_scope_topics.map(t=>`<span class="pill">✗ ${esc(t)}</span>`).join('')}</div>
-    <div style="margin-top:8px"><span class="pill">${esc(a.model)}</span><span class="pill">📱 ${esc(a.phoneNumberId)}</span>
-      ${a.spec.tools.map(t=>`<span class="pill">🔧 ${esc(t.name)}</span>`).join('')}</div>
     ${a.spec.workflow.mode==='router'
       ? `<div style="margin-top:10px"><b>${t('Workflow:')}</b> ${tf('router → {0} sub-agents', a.spec.sub_agents.length)}
          <div style="margin-top:4px">${a.spec.workflow.routes.map(r=>`<span class="pill">🧭 ${esc(r.intent)} ${arrow()} ${esc(r.target)}</span>`).join('')}</div>
