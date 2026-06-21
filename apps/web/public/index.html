@@ -838,7 +838,9 @@ async function CreateView(wrap){
     const typing=$(`<div class="bub bot muted">${esc(t('typing…'))}</div>`); chat.appendChild(typing); chat.scrollTop=chat.scrollHeight;
     try{ const r = await api('/api/wizard/message','POST',{ sessionId, text });
       typing.remove(); addBub('bot', r.reply);
-      if (r.readyToBuild) showBuildButton();
+      if (r.readyToBuild || r.buildNow) showBuildButton();
+      // The user explicitly asked to build (any language) → press "Build the agent" for them.
+      if (r.buildNow){ const b=actions.querySelector('button'); if (b && !b.disabled){ setBusy(false); buildAgent(b); return; } }
     }catch(err){ typing.remove(); addBub('bot',tf('⚠ {0}', err.message)); }
     setBusy(false); input.focus();
   };

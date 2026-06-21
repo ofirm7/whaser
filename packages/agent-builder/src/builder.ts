@@ -63,8 +63,9 @@ export class AgentBuilder {
     return { greeting: INTERVIEW_GREETING };
   }
 
-  /** One interviewer turn: the assistant's next message + whether it has enough to build. */
-  async interview(messages: InterviewTurn[]): Promise<{ reply: string; readyToBuild: boolean }> {
+  /** One interviewer turn: the assistant's next message, whether it has enough to build, and whether
+   *  the user just asked to build now (so the UI can start the build without a button click). */
+  async interview(messages: InterviewTurn[]): Promise<{ reply: string; readyToBuild: boolean; buildNow: boolean }> {
     return this.llm.interview({ messages });
   }
 

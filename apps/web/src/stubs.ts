@@ -76,20 +76,21 @@ export class StubLlmClient implements LlmClient {
 
   // --- Conversational builder stubs (deterministic; no Anthropic key) ---
 
-  async interview({ messages }: { messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }> {
+  async interview({ messages }: { messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean; buildNow: boolean }> {
     const userTurns = messages.filter((m) => m.role === 'user').length;
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
     const demoNote = ' (Demo — connect an Anthropic key for a real design conversation.)';
-    if (/\b(build it|that'?s all|that'?s everything|go ahead|create it|let'?s build|i'?m done)\b/i.test(lastUser)) {
-      return { reply: "Great — I've got enough to design it. Click \"Build the agent\" whenever you're ready." + demoNote, readyToBuild: true };
+    // Explicit "build it" intent (English + Hebrew) → start the build immediately.
+    if (/\b(build it|build the agent|that'?s all|that'?s everything|go ahead|create it|let'?s build|deploy|i'?m done)\b/i.test(lastUser) || /בנה|תבנה|צור|תצור|סיים/.test(lastUser)) {
+      return { reply: 'On it — building your agent now.' + demoNote, readyToBuild: true, buildNow: true };
     }
     const scripted = [
       'Got it. What should it be able to DO — e.g. web search, calling an external API/webhook, scheduling timed or recurring messages, or looking things up? (or say "none")',
       'Makes sense. Which topics should it stick to, which should it avoid, and when should it hand off to a human?',
       'Last thing — what tone and default language should it use, and what should it be called?',
     ];
-    if (userTurns - 1 < scripted.length) return { reply: scripted[userTurns - 1] + demoNote, readyToBuild: false };
-    return { reply: 'Perfect — that\'s enough to design a complete agent. Click "Build the agent" to generate the spec, or keep chatting to refine.' + demoNote, readyToBuild: true };
+    if (userTurns - 1 < scripted.length) return { reply: scripted[userTurns - 1] + demoNote, readyToBuild: false, buildNow: false };
+    return { reply: 'Perfect — that\'s enough to design a complete agent. Click "Build the agent" to generate the spec, or keep chatting to refine.' + demoNote, readyToBuild: true, buildNow: false };
   }
 
   async synthesizeFromConversation({ messages }: { messages: InterviewTurn[] }): Promise<unknown> {

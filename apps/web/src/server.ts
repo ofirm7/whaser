@@ -161,9 +161,9 @@ app.post('/api/wizard/message', wrap(async (req, res, auth) => {
     return;
   }
   session.messages.push({ role: 'user', content: userText });
-  const { reply, readyToBuild } = await state.builder.interview(session.messages);
+  const { reply, readyToBuild, buildNow } = await state.builder.interview(session.messages);
   session.messages.push({ role: 'assistant', content: reply });
-  res.json({ reply, readyToBuild });
+  res.json({ reply, readyToBuild, buildNow });
 }));
 
 app.post('/api/wizard/select-chats', wrap(async (req, res, auth) => {

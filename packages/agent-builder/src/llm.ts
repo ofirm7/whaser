@@ -30,7 +30,7 @@ export interface LlmClient {
    * One interviewer turn of the conversational builder: given the conversation so far, produce the
    * next assistant message and whether enough is known to design a complete agent.
    */
-  interview(args: { messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }>;
+  interview(args: { messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean; buildNow: boolean }>;
   /** Synthesize a full AgentSpec from the whole interview transcript (structured output). */
   synthesizeFromConversation(args: { messages: InterviewTurn[] }): Promise<unknown>;
   /** One interviewer turn for designing a timed action for an EXISTING agent (spec-aware). */
@@ -114,7 +114,9 @@ const INTERVIEW_SYSTEM = [
   'user can always refine afterward. Whenever ready_to_build is true, your reply MUST offer to build — tell the',
   'user you can build it now and they only need to say "build it" (or tap the Build button), and that you can',
   'keep refining if they prefer. If the user signals they are done, or asks you to build / create / deploy the',
-  'agent at any point, set ready_to_build=true immediately and confirm you are ready — stop asking questions.',
+  'agent at any point (in ANY language/phrasing), set BOTH ready_to_build=true AND build_now=true immediately,',
+  'confirm in your reply that you are building it now, and stop asking questions — Whaser will start the build',
+  'automatically. Keep build_now=false while the user is still describing or refining.',
   'Reply ONLY by calling the `respond` tool. Reply in the user\'s language.',
 ].join(' ');
 
@@ -241,7 +243,7 @@ export class AnthropicLlmClient implements LlmClient {
     return JSON.parse(text);
   }
 
-  async interview({ messages }: { messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }> {
+  async interview({ messages }: { messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean; buildNow: boolean }> {
     const tool = {
       name: 'respond',
       description: 'Send your next message to the user and report whether you have enough to build the agent.',
@@ -249,10 +251,11 @@ export class AnthropicLlmClient implements LlmClient {
       input_schema: {
         type: 'object',
         additionalProperties: false,
-        required: ['reply', 'ready_to_build'],
+        required: ['reply', 'ready_to_build', 'build_now'],
         properties: {
           reply: { type: 'string', description: 'Your next message to the user (short, friendly, one focused question).' },
           ready_to_build: { type: 'boolean', description: 'True once you have enough to design a complete, useful agent.' },
+          build_now: { type: 'boolean', description: "True ONLY when the user's latest message explicitly asks to build / create / deploy / finish the agent NOW, in ANY language or phrasing (e.g. 'build it', 'בנה את זה', 'go ahead', 'create it', 'deploy', 'yes do it'). When true, also set ready_to_build=true. False while the user is still describing or refining." },
         },
       },
     };
@@ -268,7 +271,7 @@ export class AnthropicLlmClient implements LlmClient {
     const input = res.content.find((b) => b.type === 'tool_use')?.input;
     const reply = typeof input?.reply === 'string' ? input.reply : '';
     if (!reply) throw new Error('Interviewer returned no message');
-    return { reply, readyToBuild: input?.ready_to_build === true };
+    return { reply, readyToBuild: input?.ready_to_build === true, buildNow: input?.build_now === true };
   }
 
   async synthesizeFromConversation({ messages }: { messages: InterviewTurn[] }): Promise<unknown> {
