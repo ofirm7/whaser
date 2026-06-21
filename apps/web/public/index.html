@@ -12,6 +12,13 @@
   header { display:flex; align-items:center; gap:16px; padding:12px 18px; background:var(--panel); border-bottom:1px solid var(--line); }
   header .logo { font-weight:700; color:var(--accent2); font-size:18px; }
   header nav { display:flex; gap:6px; margin-inline-start:8px; }
+  .menu { position:relative; margin-inline-start:8px; }
+  .menu .menubtn { display:inline-flex; align-items:center; gap:6px; }
+  .menu-panel { position:absolute; top:calc(100% + 6px); inset-inline-start:0; min-width:210px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:6px; box-shadow:0 10px 28px rgba(0,0,0,.45); z-index:1100; display:none; flex-direction:column; gap:2px; }
+  .menu-panel.open { display:flex; }
+  .menu-item { display:block; width:100%; text-align:start; background:transparent; border:none; color:var(--text); padding:10px 12px; border-radius:8px; cursor:pointer; font:inherit; }
+  .menu-item:hover { background:var(--panel2); }
+  .menu-item.active { background:var(--panel2); color:var(--accent2); font-weight:600; }
   header .spacer { flex:1; }
   header .who { color:var(--muted); font-size:13px; }
   button { font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--panel2); color:var(--text); padding:8px 14px; border-radius:8px; }
@@ -396,14 +403,15 @@ function render(){
 
 function Header(){
   const h = $('<header></header>');
+  const items = [['agents',t('Agents')],['catalog',t('Catalog')],['create',t('+ Create agent')],['whatsapp',t('WhatsApp')],['activity',t('Activity')]];
+  const cur = items.find(i=>i[0]===view) || ((view&&view.startsWith('agent:')) ? items[0] : items[0]);
   h.innerHTML = `<span class="logo">Whaser</span>
-    <nav>
-      <button class="nav ${view==='agents'?'active':''}" data-go="agents">${t('Agents')}</button>
-      <button class="nav ${view==='catalog'?'active':''}" data-go="catalog">${t('Catalog')}</button>
-      <button class="nav ${view==='create'?'active':''}" data-go="create">${t('+ Create agent')}</button>
-      <button class="nav ${view==='whatsapp'?'active':''}" data-go="whatsapp">${t('WhatsApp')}</button>
-      <button class="nav ${view==='activity'?'active':''}" data-go="activity">${t('Activity')}</button>
-    </nav>
+    <div class="menu">
+      <button class="nav menubtn" id="menubtn" aria-haspopup="true">☰ ${esc(cur[1])} <span style="opacity:.6">▾</span></button>
+      <div class="menu-panel" id="menupanel">
+        ${items.map(([k,label])=>`<button class="menu-item ${view===k?'active':''}" data-go="${k}">${esc(label)}</button>`).join('')}
+      </div>
+    </div>
     <span class="spacer"></span>
     <button class="badge" id="balance" title="${t('Your AI balance. Agents pause at $0 and work again once you top up above $1.')}" style="cursor:pointer;${billing.blocked?'background:var(--danger);color:#2a0a0e;border-color:var(--danger);font-weight:700':''}">💰 $${(billing.balance||0).toFixed(2)}${billing.blocked?' ⚠':''}</button>
     ${langSelect()}
@@ -411,6 +419,10 @@ function Header(){
     <span class="who">${esc(user.displayName)} · ${esc(user.tenantName)} · ${esc(user.role)}</span>
     <button class="ghost" id="logout">${t('Log out')}</button>`;
   h.querySelectorAll('[data-go]').forEach(b=> b.onclick=()=>{ view=b.dataset.go; render(); });
+  const menubtn=h.querySelector('#menubtn'), panel=h.querySelector('#menupanel');
+  menubtn.onclick=(e)=>{ e.stopPropagation(); const open=panel.classList.toggle('open');
+    if(open){ const close=(ev)=>{ if(!h.querySelector('.menu').contains(ev.target)){ panel.classList.remove('open'); document.removeEventListener('click', close); } };
+      setTimeout(()=>document.addEventListener('click', close), 0); } };
   wireLang(h);
   h.querySelector('#balance').onclick = topUpDialog;
   h.querySelector('#logout').onclick = logout;
