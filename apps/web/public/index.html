@@ -68,6 +68,7 @@ let token = localStorage.getItem('whaser_token');
 let user = JSON.parse(localStorage.getItem('whaser_user') || 'null');
 let mode = 'stub';
 let whatsapp = { configured:false, phoneNumberId:null, boundAgentId:null };
+let billing = { balance:0, blocked:false, resumeAbove:1 };
 let waPollTimer = null;
 let view = 'agents';
 
@@ -381,6 +382,10 @@ function render(){
   root.appendChild(Header());
   const wrap = $('<div class="wrap"></div>');
   root.appendChild(wrap);
+  if (billing.blocked){
+    const ban=$(`<div class="card" style="border-color:var(--danger);background:rgba(241,92,109,.08)"><b>${t('⚠️ Your balance is empty — your agents have paused.')}</b><div class="muted" style="margin:4px 0 8px">${t('Your agents won\'t answer (on WhatsApp or here) until you add credit and go above $1.')}</div><button class="primary" id="ban-topup">${t('Add credit')}</button></div>`);
+    wrap.appendChild(ban); ban.querySelector('#ban-topup').onclick=topUpDialog;
+  }
   if (view === 'agents') AgentsView(wrap);
   else if (view === 'catalog') CatalogView(wrap);
   else if (view === 'create') CreateView(wrap);
@@ -400,14 +405,37 @@ function Header(){
       <button class="nav ${view==='activity'?'active':''}" data-go="activity">${t('Activity')}</button>
     </nav>
     <span class="spacer"></span>
+    <button class="badge" id="balance" title="${t('Your AI balance. Agents pause at $0 and work again once you top up above $1.')}" style="cursor:pointer;${billing.blocked?'background:var(--danger);color:#2a0a0e;border-color:var(--danger);font-weight:700':''}">💰 $${(billing.balance||0).toFixed(2)}${billing.blocked?' ⚠':''}</button>
     ${langSelect()}
     <span class="badge ${mode==='claude'?'live':'paused'}" title="${mode==='claude'?t('Live Claude (ANTHROPIC_API_KEY set)'):t('Demo mode — set ANTHROPIC_API_KEY for real Claude')}">${mode==='claude'?t('● Claude'):t('● Demo')}</span>
     <span class="who">${esc(user.displayName)} · ${esc(user.tenantName)} · ${esc(user.role)}</span>
     <button class="ghost" id="logout">${t('Log out')}</button>`;
   h.querySelectorAll('[data-go]').forEach(b=> b.onclick=()=>{ view=b.dataset.go; render(); });
   wireLang(h);
+  h.querySelector('#balance').onclick = topUpDialog;
   h.querySelector('#logout').onclick = logout;
   return h;
+}
+
+// Demo top-up: add AI credit. (No real payment in this POC.)
+function topUpDialog(){
+  const backdrop=$('<div class="modal-backdrop"></div>');
+  const card=$('<div class="card modal"></div>');
+  card.innerHTML=`<h2>${t('Add credit')}</h2>
+    <div class="muted" style="margin-bottom:10px">${tf('Your balance now: ${0}.', (billing.balance||0).toFixed(2))} ${t('Your agents pause when it reaches $0, and start working again once you go above $1.')}</div>
+    <div class="row" style="gap:8px">
+      <button class="primary" data-amt="5" style="flex:1">+ $5</button>
+      <button class="primary" data-amt="10" style="flex:1">+ $10</button>
+      <button class="primary" data-amt="20" style="flex:1">+ $20</button></div>
+    <div class="muted" style="margin-top:10px;font-size:12px">${t('Demo only — no real payment is charged.')}</div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="tu-x">${t('Close')}</button></div>`;
+  const close=()=>{ backdrop.remove(); };
+  backdrop.onclick=(e)=>{ if(e.target===backdrop) close(); };
+  card.querySelector('#tu-x').onclick=close;
+  card.querySelectorAll('[data-amt]').forEach(b=> b.onclick=async()=>{ b.disabled=true;
+    try{ billing = await api('/api/billing/topup','POST',{ amount:Number(b.dataset.amt) }); close(); render(); }
+    catch(e){ alert(e.message); b.disabled=false; } });
+  backdrop.appendChild(card); document.body.appendChild(backdrop);
 }
 
 function LoginView(){
@@ -419,7 +447,7 @@ function LoginView(){
       const body={ username:card.querySelector('#u').value.trim(), password:card.querySelector('#p').value };
       if(signup) body.displayName = (card.querySelector('#dn')||{}).value || '';
       const d = await api(signup?'/api/register':'/api/login','POST',body);
-      token=d.token; user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp;
+      token=d.token; user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp; billing=d.billing||billing;
       localStorage.setItem('whaser_token',token); localStorage.setItem('whaser_user',JSON.stringify(user)); view='agents'; render();
     }catch(err){ const el=card.querySelector('#e'); if(el) el.textContent = (!signup && /credential|401|unauthor/i.test(err.message)) ? t('Wrong username or password — please try again.') : err.message; } };
   function paint(){ const signup=amode==='signup';
@@ -624,10 +652,13 @@ async function AgentDetailView(wrap, id){
   const addBub = (who, text)=>{ const b=$(`<div class="bub ${who}"></div>`); b.textContent=text; chat.appendChild(b); chat.scrollTop=chat.scrollHeight; };
   const loadHist = async ()=>{ const {history}=await api('/api/sim/history?agentId='+encodeURIComponent(id)+'&from='+encodeURIComponent(from)); chat.innerHTML=''; history.forEach(m=>addBub(m.role==='user'?'me':'bot', m.content)); if(!history.length) addBub('bot',t('(no messages yet — say hi)')); };
   await loadHist();
+  const refreshBalance = async ()=>{ try{ billing = await api('/api/billing'); const el=document.getElementById('balance'); if(el){ el.textContent='💰 $'+(billing.balance||0).toFixed(2)+(billing.blocked?' ⚠':''); if(billing.blocked) el.style.cssText='cursor:pointer;background:var(--danger);color:#2a0a0e;border-color:var(--danger);font-weight:700'; } }catch{} };
   const send = async ()=>{ const inp=sim.querySelector('#msg'); const text=inp.value.trim(); if(!text) return; inp.value=''; addBub('me',text);
     try{ const out = await api('/api/sim/send','POST',{ agentId:id, from, text });
       if(out.reply) addBub('bot', (out.routedTo && out.routedTo!=='default' ? tf('🧭 routed → {0}', out.routedTo)+'\n' : '') + out.reply);
-      else addBub('bot', out.blocked?tf('(no reply: {0})', out.blocked):t('(no reply)')); }
+      else if(out.blocked==='no_balance') addBub('bot', t('⚠️ Your balance is empty — add credit (tap 💰 at the top) to keep chatting.'));
+      else addBub('bot', out.blocked?tf('(no reply: {0})', out.blocked):t('(no reply)'));
+      refreshBalance(); }
     catch(err){ addBub('bot',tf('⚠ {0}', err.message)); } };
   sim.querySelector('#send').onclick = send;
   sim.querySelector('#msg').addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });
@@ -897,7 +928,7 @@ async function CreateView(wrap){
   }
 }
 
-(async function init(){ if (token){ try{ const d=await api('/api/me'); user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp; }catch{} } render(); })();
+(async function init(){ if (token){ try{ const d=await api('/api/me'); user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp; billing=d.billing||billing; }catch{} } render(); })();
 </script>
 </body>
 </html>

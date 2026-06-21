@@ -9,6 +9,7 @@ import type { AgentRuntime, AgentReply, RuntimeMessage } from '../../../packages
  */
 export class WorkflowAgentRuntime implements AgentRuntime {
   lastRoutedTo = 'default';
+  lastUsage: { inputTokens: number; outputTokens: number } = { inputTokens: 0, outputTokens: 0 };
 
   constructor(
     private readonly getSpec: (agentId: string) => AgentSpec | undefined,
@@ -21,6 +22,7 @@ export class WorkflowAgentRuntime implements AgentRuntime {
     const spec = this.getSpec(agentId);
     if (!spec) {
       this.lastRoutedTo = 'default';
+      this.lastUsage = { inputTokens: 0, outputTokens: 0 };
       return { text: "This agent isn't available.", usage: { inputTokens: 0, outputTokens: 0 }, finishReason: 'stop' };
     }
     // Per-call style injection for this agent's owner (no shared mutable state).
@@ -33,6 +35,7 @@ export class WorkflowAgentRuntime implements AgentRuntime {
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
     const r = await new WorkflowEngine(spec, llm).handle(wmsgs, currentTurnMedia, this.getExecutor?.(agentId));
     this.lastRoutedTo = r.routedTo;
+    this.lastUsage = r.usage;
     return { text: r.text, usage: r.usage, finishReason: 'stop' };
   }
 }

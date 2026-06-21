@@ -108,7 +108,7 @@ app.post('/api/login', async (req: Request, res: Response) => {
     role: u.role,
   };
   tokens.set(token, user);
-  res.json({ token, user, mode: state.mode, whatsapp: state.whatsappStatus() });
+  res.json({ token, user, mode: state.mode, whatsapp: state.whatsappStatus(), billing: state.billingState(user.tenantId) });
 });
 
 app.post('/api/register', async (req: Request, res: Response) => {
@@ -127,7 +127,7 @@ app.post('/api/register', async (req: Request, res: Response) => {
   const token = randomBytes(24).toString('hex');
   const user: SessionUser = { username: u.username, displayName: u.displayName, tenantId: u.tenantId, tenantName: u.tenantName, role: u.role };
   tokens.set(token, user);
-  res.json({ token, user, mode: state.mode, whatsapp: state.whatsappStatus() });
+  res.json({ token, user, mode: state.mode, whatsapp: state.whatsappStatus(), billing: state.billingState(user.tenantId) });
 });
 
 app.get('/api/me', (req: Request, res: Response) => {
@@ -136,8 +136,17 @@ app.get('/api/me', (req: Request, res: Response) => {
     res.sendStatus(401);
     return;
   }
-  res.json({ user: auth, mode: state.mode, whatsapp: state.whatsappStatus(), tenantTokensUsed: state.tenantUsage(auth.tenantId) });
+  res.json({ user: auth, mode: state.mode, whatsapp: state.whatsappStatus(), tenantTokensUsed: state.tenantUsage(auth.tenantId), billing: state.billingState(auth.tenantId) });
 });
+
+// --- Billing (per-tenant USD balance; AI stops at $0, resumes above $1) ---
+app.get('/api/billing', wrap(async (_req, res, auth) => {
+  res.json(state.billingState(auth.tenantId));
+}));
+app.post('/api/billing/topup', wrap(async (req, res, auth) => {
+  const { amount } = (req.body ?? {}) as { amount?: unknown };
+  res.json(state.topUp(auth.tenantId, Number(amount) || 0));
+}));
 
 // --- Wizard ---
 app.post('/api/wizard/start', wrap(async (_req, res, auth) => {
@@ -160,8 +169,13 @@ app.post('/api/wizard/message', wrap(async (req, res, auth) => {
     res.status(400).json({ error: 'empty message' });
     return;
   }
+  if (!state.canSpend(auth.tenantId)) {
+    res.status(402).json({ error: 'Your balance is empty — add credit (above $1) to keep chatting with Whaser.' });
+    return;
+  }
   session.messages.push({ role: 'user', content: userText });
   const { reply, readyToBuild, buildNow } = await state.builder.interview(session.messages);
+  state.recordSpendText(auth.tenantId, userText, reply);
   session.messages.push({ role: 'assistant', content: reply });
   res.json({ reply, readyToBuild, buildNow });
 }));
