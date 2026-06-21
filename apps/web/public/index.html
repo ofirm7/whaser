@@ -11,15 +11,18 @@
   a { color:var(--accent2); }
   header { display:flex; align-items:center; gap:16px; padding:12px 18px; background:var(--panel); border-bottom:1px solid var(--line); }
   header .logo { font-weight:700; color:var(--accent2); font-size:18px; }
-  header nav { display:flex; gap:6px; margin-left:8px; }
+  header nav { display:flex; gap:6px; margin-inline-start:8px; }
   header .spacer { flex:1; }
   header .who { color:var(--muted); font-size:13px; }
   button { font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--panel2); color:var(--text); padding:8px 14px; border-radius:8px; }
   button.primary { background:var(--accent); border-color:var(--accent); color:#04231c; font-weight:600; }
+  button.danger { background:var(--danger); border-color:var(--danger); color:#2a0a0e; font-weight:600; }
   button.ghost { background:transparent; }
   button.nav { background:transparent; border-color:transparent; color:var(--muted); }
   button.nav.active { color:var(--text); background:var(--panel2); }
   button:disabled { opacity:.5; cursor:default; }
+  select { font:inherit; background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px; cursor:pointer; }
+  select.lang { padding:6px 8px; font-size:13px; }
   input, textarea { font:inherit; background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px 12px; width:100%; }
   .wrap { max-width:880px; margin:0 auto; padding:22px 18px 60px; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
@@ -35,16 +38,19 @@
   .bub.bot { align-self:flex-start; background:var(--panel2); }
   .bub.me { align-self:flex-end; background:#005c4b; }
   .composer { display:flex; gap:8px; margin-top:10px; }
-  pre { background:#0b141a; border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; font-size:12.5px; }
+  pre { background:#0b141a; border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; font-size:12.5px; direction:ltr; text-align:left; }
   .err { color:var(--danger); }
   .ok { color:var(--accent2); }
   .center { min-height:70vh; display:flex; align-items:center; justify-content:center; }
   .login { width:340px; }
+  .login .langbar { display:flex; justify-content:flex-end; margin-bottom:6px; }
   label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
-  .pill { display:inline-block; font-size:12px; background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:2px 9px; margin:2px 4px 2px 0; }
+  .pill { display:inline-block; font-size:12px; background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:2px 9px; margin:2px 0; margin-inline-end:4px; }
   .wa-av { display:inline-block; border-radius:50%; background:#3b4a54; color:#e9edef; text-align:center; vertical-align:middle; font-weight:600; background-size:cover; background-position:center; overflow:hidden; flex:0 0 auto; }
   .wa-av.grp { background:#1f5132; color:#d7f5e3; }
   .wa-av.img { background-color:transparent; color:transparent; }
+  .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; padding:18px; z-index:1000; }
+  .modal { width:400px; max-width:100%; margin:0; }
 </style>
 </head>
 <body>
@@ -58,17 +64,193 @@ let whatsapp = { configured:false, phoneNumberId:null, boundAgentId:null };
 let waPollTimer = null;
 let view = 'agents';
 
+// --- i18n: English (US) + Hebrew (RTL). The English source string is the lookup key; I18N[lang]
+// holds the overrides. A missing key falls back to the English source, so the UI never breaks. ---
+const I18N = { he: {
+    "\"{0}\" will be permanently removed, along with its number binding and any chats it listens on. This can't be undone.": "\"{0}\" יימחק לצמיתות, יחד עם שיוך המספר שלו וכל הצ׳אטים שהוא מאזין להם. לא ניתן לבטל פעולה זו.",
+    "(Claude Agent Skill)": "(מיומנות סוכן של Claude)",
+    "(no messages yet — say hi)": "(אין עדיין הודעות — תגידו שלום)",
+    "(no reply)": "(אין תשובה)",
+    "(no reply: {0})": "(אין תשובה: {0})",
+    "(router sub-agent)": "(תת-סוכן ניתוב)",
+    "+ Create agent": "+ יצירת סוכן",
+    "AI-driven WhatsApp agent builder": "בונה סוכני WhatsApp מבוסס בינה מלאכותית",
+    "Activity": "פעילות",
+    "Add URL": "הוספת כתובת URL",
+    "Add context": "הוספת הקשר",
+    "Add context, a skill, or a workflow. Each change is drafted → you review it → Confirm (the agent version bumps).": "הוספת הקשר, מיומנות או תהליך עבודה. כל שינוי מנוסח ← אתם בודקים אותו ← מאשרים (גרסת הסוכן עולה).",
+    "Add skill": "הוספת מיומנות",
+    "Add workflow": "הוספת תהליך עבודה",
+    "Agents": "סוכנים",
+    "Analyzing transcripts…": "מנתח תמלולים…",
+    "Answer a few questions — Whaser assembles a precise, validated agent spec. (This is Whaser's differentiator: a conversation, not a flow canvas.)": "ענו על כמה שאלות — Whaser ירכיב מפרט סוכן מדויק ומאומת. (זהו הייחוד של Whaser: שיחה, ולא לוח זרימה.)",
+    "Applied — agent is now v{0}. Reloading…": "הוחל — הסוכן כעת בגרסה v{0}. טוען מחדש…",
+    "Apply selected": "החלת הנבחרים",
+    "Ask Changes": "בקשת שינויים",
+    "Ask changes": "בקשת שינויים",
+    "Build the agent": "בניית הסוכן",
+    "Cancel": "ביטול",
+    "Catalog": "קטלוג",
+    "Confirm": "אישור",
+    "Confirm — {0}": "אישור — {0}",
+    "Connecting to WhatsApp… generating QR…": "מתחבר ל-WhatsApp… יוצר קוד QR…",
+    "Consistency: {0}": "עקביות: {0}",
+    "Continue": "המשך",
+    "Create a new agent": "יצירת סוכן חדש",
+    "Create account": "יצירת חשבון",
+    "Curated, ready-to-deploy agents — pick one to launch it on a number instantly.": "סוכנים מובחרים, מוכנים לפריסה — בחרו אחד כדי להפעיל אותו על מספר באופן מיידי.",
+    "Delete agent?": "למחוק את הסוכן?",
+    "Demo mode — set ANTHROPIC_API_KEY for real Claude": "מצב הדגמה — הגדירו ANTHROPIC_API_KEY עבור Claude אמיתי",
+    "Deploy": "פריסה",
+    "Describe a new task area / sub-agent…": "תארו תחום משימה חדש / תת-סוכן…",
+    "Describe context for Claude to add…": "תארו הקשר ש-Claude יוסיף…",
+    "Display name": "שם תצוגה",
+    "Draft from description": "ניסוח מתוך התיאור",
+    "Draft skill": "ניסוח מיומנות",
+    "Draft workflow": "ניסוח תהליך עבודה",
+    "Drafting improvements…": "מנסח שיפורים…",
+    "Drafting…": "מנסח…",
+    "Each agent replies only in the chats picked during its creation. Use <b>+ Create agent</b> and select its chats.": "כל סוכן עונה רק בצ׳אטים שנבחרו בעת יצירתו. השתמשו ב<b>+ יצירת סוכן</b> ובחרו את הצ׳אטים שלו.",
+    "Every agent your tenant ({0}) owns. Create one with the guided conversation.": "כל הסוכנים שבבעלות הארגון שלכם ({0}). צרו סוכן באמצעות השיחה המודרכת.",
+    "Extend agent": "הרחבת הסוכן",
+    "Fetching…": "מאחזר…",
+    "Generated AgentSpec": "AgentSpec שנוצר",
+    "Group": "קבוצה",
+    "Language": "שפה",
+    "Last activity: {0}": "פעילות אחרונה: {0}",
+    "Link my WhatsApp": "קישור ה-WhatsApp שלי",
+    "Listen on: {0}": "האזנה ל: {0}",
+    "Listening on:": "מאזין ל:",
+    "Live Claude (ANTHROPIC_API_KEY set)": "Claude חי (ANTHROPIC_API_KEY מוגדר)",
+    "Live feed of inbound → routing → reply across your tenant's agents (simulator 🧪 + WhatsApp 📱). Newest first, refreshes automatically.": "הזנה חיה של נכנס ← ניתוב ← תשובה בכל הסוכנים של הארגון שלכם (סימולטור 🧪 + WhatsApp 📱). החדשים ביותר תחילה, מתרענן אוטומטית.",
+    "Log out": "התנתקות",
+    "Message this agent…": "שלחו הודעה לסוכן זה…",
+    "New here? Click <b>Sign up</b> to get your own agents + WhatsApp.": "חדשים כאן? לחצו על <b>הרשמה</b> כדי לקבל סוכנים משלכם + WhatsApp.",
+    "No activity yet. Use an agent's simulator, or message a linked chat.": "אין עדיין פעילות. השתמשו בסימולטור של סוכן, או שלחו הודעה לצ׳אט מקושר.",
+    "No agents yet. Click <b>+ Create agent</b> to design one.": "אין עדיין סוכנים. לחצו על <b>+ יצירת סוכן</b> כדי לעצב אחד.",
+    "No matches (try a name or number; chats appear after they sync).": "אין התאמות (נסו שם או מספר; צ׳אטים מופיעים לאחר הסנכרון).",
+    "On your phone: <b>WhatsApp → Settings → Linked devices → Link a device</b>, then scan this code:": "בטלפון שלכם: <b>WhatsApp ← הגדרות ← מכשירים מקושרים ← קישור מכשיר</b>, ואז סרקו את הקוד הזה:",
+    "Password": "סיסמה",
+    "Pause": "השהיה",
+    "Preview spec": "תצוגה מקדימה של המפרט",
+    "Publish & bind a number": "פרסום ושיוך מספר",
+    "Published as {0} on {1}. Opening…": "פורסם בתור {0} על {1}. פותח…",
+    "Re-drafting…": "מנסח מחדש…",
+    "Reading \"{0}\"…": "קורא את \"{0}\"…",
+    "Resume": "חידוש",
+    "Save chats": "שמירת צ׳אטים",
+    "Scan in WhatsApp → Settings → Linked devices → Link a device:": "סרקו ב-WhatsApp ← הגדרות ← מכשירים מקושרים ← קישור מכשיר:",
+    "Schema: {0}": "סכמה: {0}",
+    "Search chats/contacts…": "חיפוש צ׳אטים/אנשי קשר…",
+    "Search your contacts and groups by name or number, then tick the ones to listen on.": "חפשו את אנשי הקשר והקבוצות שלכם לפי שם או מספר, ואז סמנו את אלה שאליהם להאזין.",
+    "Self-improvement": "שיפור עצמי",
+    "Send": "שליחה",
+    "Sends a real inbound message through the gateway → resolver → cost/abuse breaker → agent runtime → reply. (LLM + WhatsApp transport are stubbed locally.)": "שולח הודעה נכנסת אמיתית דרך השער ← המנתב ← בקרת עלות/ניצול לרעה ← סביבת הריצה של הסוכן ← תשובה. (ה-LLM ותעבורת ה-WhatsApp מדומים מקומית.)",
+    "Session expired — please log in.": "פג תוקף ההפעלה — אנא התחברו מחדש.",
+    "Sign in": "כניסה",
+    "Sign up": "הרשמה",
+    "Skills:": "מיומנויות:",
+    "Suggest improvements": "הצעת שיפורים",
+    "Tell the agent what to improve (optional), then get editable suggestions you approve — approved changes bump the version. Leave blank to suggest from recent chats.": "ספרו לסוכן מה לשפר (לא חובה), ואז קבלו הצעות הניתנות לעריכה שאתם מאשרים — שינויים מאושרים מעלים את הגרסה. השאירו ריק כדי להציע על סמך הצ׳אטים האחרונים.",
+    "The catalog is empty.": "הקטלוג ריק.",
+    "Then message <b>+{0}</b> from a selected chat — the agent (WAT + Claude) replies; unselected chats are ignored.": "לאחר מכן שלחו הודעה אל <b>+{0}</b> מצ׳אט נבחר — הסוכן (WAT + Claude) עונה; צ׳אטים שלא נבחרו מתעלמים מהם.",
+    "Type your answer…": "הקלידו את תשובתכם…",
+    "Username": "שם משתמש",
+    "View AgentSpec": "הצגת AgentSpec",
+    "Waiting for the scan… (the code refreshes automatically)": "ממתין לסריקה… (הקוד מתרענן אוטומטית)",
+    "What should the skill do, and when should it trigger?": "מה המיומנות צריכה לעשות, ומתי כדאי להפעיל אותה?",
+    "WhatsApp": "WhatsApp",
+    "WhatsApp simulator": "סימולטור WhatsApp",
+    "WhatsApp — link your number (QR)": "WhatsApp — קישור המספר שלכם (QR)",
+    "Which chats should this agent answer?": "לאילו צ׳אטים הסוכן צריך לענות?",
+    "Workflow:": "תהליך עבודה:",
+    "Your WhatsApp isn't linked yet — link it to choose chats.": "ה-WhatsApp שלכם עדיין לא מקושר — קשרו אותו כדי לבחור צ׳אטים.",
+    "Your account gets its <b>own agents and WhatsApp connection</b>; the catalog is shared.": "החשבון שלכם מקבל <b>סוכנים וחיבור WhatsApp משלו</b>; הקטלוג משותף.",
+    "Your name": "השם שלכם",
+    "at least 6 characters": "לפחות 6 תווים",
+    "default": "ברירת מחדל",
+    "e.g. be more formal; stop answering legal questions; add our refund policy": "למשל: להיות רשמי יותר; להפסיק לענות על שאלות משפטיות; להוסיף את מדיניות ההחזרים שלנו",
+    "e.g. shorten it / add a step about refunds / rename the sub-agent": "למשל: לקצר / להוסיף שלב על החזרים / לשנות את שם תת-הסוכן",
+    "from {0}": "מאת {0}",
+    "https://… (fetch a page)": "https://… (אחזור עמוד)",
+    "live": "חי",
+    "needs attention": "דורש תשומת לב",
+    "no chats selected (chosen during creation)": "לא נבחרו צ׳אטים (נבחרים בעת היצירה)",
+    "none selected yet": "עדיין לא נבחר אף אחד",
+    "password": "סיסמה",
+    "paused": "מושהה",
+    "router → {0} sub-agents": "מנתב ← {0} תת-סוכנים",
+    "single agent": "סוכן יחיד",
+    "username": "שם משתמש",
+    "your number": "המספר שלכם",
+    "{0} Add guidance above, or chat with the agent first.": "{0} הוסיפו הנחיה למעלה, או שוחחו תחילה עם הסוכן.",
+    "← Agents": "→ סוכנים",
+    "● Claude": "● Claude",
+    "● Demo": "● הדגמה",
+    "⚠ {0}": "⚠ {0}",
+    "⚠️ <b>POC only.</b> This links your <i>personal</i> WhatsApp via the unofficial WhatsApp-Web protocol — against WhatsApp's ToS, with a real risk of the number being banned. Prefer a spare SIM. The Cloud API path is the production-safe option.": "⚠️ <b>הדגמה בלבד.</b> זה מקשר את ה-WhatsApp <i>האישי</i> שלכם דרך פרוטוקול WhatsApp-Web הלא-רשמי — בניגוד לתנאי השימוש של WhatsApp, עם סיכון ממשי לחסימת המספר. עדיף להשתמש ב-SIM חלופי. נתיב ה-Cloud API הוא האפשרות הבטוחה לסביבת ייצור.",
+    "✏️ Edit chats": "✏️ עריכת צ׳אטים",
+    "✓ Cloud API connected": "✓ Cloud API מחובר",
+    "✓ Linked": "✓ מקושר",
+    "✓ Linked as +{0}": "✓ מקושר בתור +{0}",
+    "✓ valid & consistent — ready to publish": "✓ תקין ועקבי — מוכן לפרסום",
+    "📲 Connect Cloud API ({0})": "📲 חיבור Cloud API ({0})",
+    "🗑 Delete agent": "🗑 מחיקת סוכן",
+    "🧭 routed → {0}": "🧭 נותב ← {0}",
+    "WhatsApp QR": "קוד QR של WhatsApp"
+  } };
+let lang = localStorage.getItem('whaser_lang') || 'en';
+function t(s){ const d = I18N[lang]; return (d && d[s] != null) ? d[s] : s; }
+function tf(s, ...a){ return t(s).replace(/\{(\d+)\}/g, (_, i) => (a[+i] != null ? a[+i] : '')); }
+function locale(){ return lang === 'he' ? 'he-IL' : 'en-US'; }
+function arrow(){ return lang === 'he' ? '←' : '→'; } // flow arrows read right-to-left in Hebrew
+function applyDir(){ const el = document.documentElement; el.lang = lang; el.dir = (lang === 'he') ? 'rtl' : 'ltr'; }
+function setLang(l){ if (l === lang) return; lang = l; localStorage.setItem('whaser_lang', l); applyDir(); render(); }
+function langSelect(){ return `<select class="lang" title="${t('Language')}" aria-label="${t('Language')}">
+  <option value="en"${lang==='en'?' selected':''}>English (US)</option>
+  <option value="he"${lang==='he'?' selected':''}>עברית</option></select>`; }
+function wireLang(el){ const s = el.querySelector('.lang'); if (s) s.onchange = (e)=> setLang(e.target.value); }
+applyDir();
+
 async function api(path, method='GET', body){
   const r = await fetch(path, { method, headers:{ 'content-type':'application/json', ...(token?{authorization:'Bearer '+token}:{}) }, body: body?JSON.stringify(body):undefined });
-  if (r.status === 401){ logout(); throw new Error('Session expired — please log in.'); }
+  if (r.status === 401){ logout(); throw new Error(t('Session expired — please log in.')); }
   if (!r.ok){ let e; try{ e=await r.json(); }catch{ e={error:r.statusText}; } throw new Error(e.error || ('HTTP '+r.status)); }
   return r.status === 204 ? null : r.json();
 }
 function logout(){ token=null; user=null; localStorage.removeItem('whaser_token'); localStorage.removeItem('whaser_user'); render(); }
 function esc(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
+// Themed confirmation pop-up. Returns Promise<boolean> — true on confirm, false on cancel
+// (Cancel button, backdrop click, or Escape). Cancel is focused by default so a destructive
+// action is never the accidental default. Open dialogs are tracked so a re-render (e.g. a
+// concurrent 401 → logout → render) tears them down instead of leaving a stray overlay/listener.
+const _openDialogs = new Set();
+function confirmDialog({ title, message, confirmLabel, danger=false }){
+  return new Promise(resolve=>{
+    const backdrop=$('<div class="modal-backdrop"></div>');
+    const card=$('<div class="card modal" role="dialog" aria-modal="true"></div>');
+    card.innerHTML = `<h2 style="margin-bottom:8px">${esc(title)}</h2>
+      <div class="muted" style="margin-bottom:16px">${esc(message)}</div>
+      <div class="row" style="justify-content:flex-end">
+        <button class="ghost" data-act="cancel">${esc(t('Cancel'))}</button>
+        <button class="${danger?'danger':'primary'}" data-act="ok">${esc(confirmLabel || t('Confirm'))}</button></div>`;
+    let done=false;
+    const close=(val)=>{ if(done) return; done=true; _openDialogs.delete(close); document.removeEventListener('keydown', onKey); backdrop.remove(); resolve(val); };
+    const onKey=(e)=>{ if(e.key==='Escape') close(false); };
+    card.querySelector('[data-act=cancel]').onclick=()=>close(false);
+    card.querySelector('[data-act=ok]').onclick=()=>close(true);
+    backdrop.onclick=(e)=>{ if(e.target===backdrop) close(false); };
+    document.addEventListener('keydown', onKey);
+    _openDialogs.add(close);
+    backdrop.appendChild(card); document.body.appendChild(backdrop);
+    card.querySelector('[data-act=cancel]').focus();
+  });
+}
+
 function render(){
   if (waPollTimer){ clearInterval(waPollTimer); waPollTimer=null; }
+  [..._openDialogs].forEach(close=>close(false)); // never let a modal outlive a re-render
   const root = document.getElementById('root');
   root.innerHTML = '';
   if (!token || !user){ root.appendChild(LoginView()); return; }
@@ -87,17 +269,19 @@ function Header(){
   const h = $('<header></header>');
   h.innerHTML = `<span class="logo">Whaser</span>
     <nav>
-      <button class="nav ${view==='agents'?'active':''}" data-go="agents">Agents</button>
-      <button class="nav ${view==='catalog'?'active':''}" data-go="catalog">Catalog</button>
-      <button class="nav ${view==='create'?'active':''}" data-go="create">+ Create agent</button>
-      <button class="nav ${view==='whatsapp'?'active':''}" data-go="whatsapp">WhatsApp</button>
-      <button class="nav ${view==='activity'?'active':''}" data-go="activity">Activity</button>
+      <button class="nav ${view==='agents'?'active':''}" data-go="agents">${t('Agents')}</button>
+      <button class="nav ${view==='catalog'?'active':''}" data-go="catalog">${t('Catalog')}</button>
+      <button class="nav ${view==='create'?'active':''}" data-go="create">${t('+ Create agent')}</button>
+      <button class="nav ${view==='whatsapp'?'active':''}" data-go="whatsapp">${t('WhatsApp')}</button>
+      <button class="nav ${view==='activity'?'active':''}" data-go="activity">${t('Activity')}</button>
     </nav>
     <span class="spacer"></span>
-    <span class="badge ${mode==='claude'?'live':'paused'}" title="${mode==='claude'?'Live Claude (ANTHROPIC_API_KEY set)':'Demo mode — set ANTHROPIC_API_KEY for real Claude'}">${mode==='claude'?'● Claude':'● Demo'}</span>
+    ${langSelect()}
+    <span class="badge ${mode==='claude'?'live':'paused'}" title="${mode==='claude'?t('Live Claude (ANTHROPIC_API_KEY set)'):t('Demo mode — set ANTHROPIC_API_KEY for real Claude')}">${mode==='claude'?t('● Claude'):t('● Demo')}</span>
     <span class="who">${esc(user.displayName)} · ${esc(user.tenantName)} · ${esc(user.role)}</span>
-    <button class="ghost" id="logout">Log out</button>`;
+    <button class="ghost" id="logout">${t('Log out')}</button>`;
   h.querySelectorAll('[data-go]').forEach(b=> b.onclick=()=>{ view=b.dataset.go; render(); });
+  wireLang(h);
   h.querySelector('#logout').onclick = logout;
   return h;
 }
@@ -115,16 +299,24 @@ function LoginView(){
       localStorage.setItem('whaser_token',token); localStorage.setItem('whaser_user',JSON.stringify(user)); view='agents'; render();
     }catch(err){ const el=card.querySelector('#e'); if(el) el.textContent = err.message; } };
   function paint(){ const signup=amode==='signup';
-    card.innerHTML = `<h1>Whaser</h1><div class="muted" style="margin-bottom:10px">AI-driven WhatsApp agent builder</div>
+    card.innerHTML = `<div class="langbar">${langSelect()}</div>
+      <h1>Whaser</h1><div class="muted" style="margin-bottom:10px">${t('AI-driven WhatsApp agent builder')}</div>
       <div class="row" style="gap:6px;margin-bottom:10px">
-        <button class="${signup?'ghost':'primary'}" data-m="login" style="flex:1">Sign in</button>
-        <button class="${signup?'primary':'ghost'}" data-m="signup" style="flex:1">Sign up</button></div>
-      ${signup?'<label>Display name</label><input id="dn" placeholder="Your name" autocomplete="name"/>':''}
-      <label>Username</label><input id="u" autocomplete="username" placeholder="username"/>
-      <label>Password</label><input id="p" type="password" autocomplete="${signup?'new-password':'current-password'}" placeholder="${signup?'at least 6 characters':'password'}"/>
-      <div style="margin-top:14px"><button class="primary" id="go" style="width:100%">${signup?'Create account':'Sign in'}</button></div>
+        <button class="${signup?'ghost':'primary'}" data-m="login" style="flex:1">${t('Sign in')}</button>
+        <button class="${signup?'primary':'ghost'}" data-m="signup" style="flex:1">${t('Sign up')}</button></div>
+      ${signup?`<label>${t('Display name')}</label><input id="dn" placeholder="${t('Your name')}" autocomplete="name"/>`:''}
+      <label>${t('Username')}</label><input id="u" autocomplete="username" placeholder="${t('username')}"/>
+      <label>${t('Password')}</label><input id="p" type="password" autocomplete="${signup?'new-password':'current-password'}" placeholder="${signup?t('at least 6 characters'):t('password')}"/>
+      <div style="margin-top:14px"><button class="primary" id="go" style="width:100%">${signup?t('Create account'):t('Sign in')}</button></div>
       <div class="err" id="e" style="margin-top:10px"></div>
-      <div class="muted" style="margin-top:12px;font-size:12.5px">${signup?'Your account gets its <b>own agents and WhatsApp connection</b>; the catalog is shared.':'New here? Click <b>Sign up</b> to get your own agents + WhatsApp.'}</div>`;
+      <div class="muted" style="margin-top:12px;font-size:12.5px">${signup?t('Your account gets its <b>own agents and WhatsApp connection</b>; the catalog is shared.'):t('New here? Click <b>Sign up</b> to get your own agents + WhatsApp.')}</div>`;
+    // Switch language without a full re-render so typed credentials survive the repaint.
+    const langSel = card.querySelector('.lang');
+    if (langSel) langSel.onchange = (e)=>{
+      const vals = {}; card.querySelectorAll('input').forEach(i=> vals[i.id]=i.value);
+      lang = e.target.value; localStorage.setItem('whaser_lang', lang); applyDir(); paint();
+      card.querySelectorAll('input').forEach(i=>{ if(vals[i.id]!=null) i.value=vals[i.id]; });
+    };
     card.querySelectorAll('[data-m]').forEach(b=> b.onclick=()=>{ amode=b.dataset.m; paint(); });
     card.querySelector('#go').onclick = submit;
     card.querySelectorAll('input').forEach(i=> i.addEventListener('keydown', ev=>{ if(ev.key==='Enter') submit(); }));
@@ -135,19 +327,19 @@ function LoginView(){
 }
 
 async function AgentsView(wrap){
-  wrap.appendChild($('<h1>Agents</h1>'));
-  wrap.appendChild($(`<div class="muted" style="margin-bottom:14px">Every agent your tenant (${esc(user.tenantName)}) owns. Create one with the guided conversation.</div>`));
+  wrap.appendChild($(`<h1>${t('Agents')}</h1>`));
+  wrap.appendChild($(`<div class="muted" style="margin-bottom:14px">${tf('Every agent your tenant ({0}) owns. Create one with the guided conversation.', esc(user.tenantName))}</div>`));
   try {
     const { agents } = await api('/api/agents');
-    if (!agents.length){ wrap.appendChild($('<div class="card muted">No agents yet. Click <b>+ Create agent</b> to design one.</div>')); return; }
+    if (!agents.length){ wrap.appendChild($(`<div class="card muted">${t('No agents yet. Click <b>+ Create agent</b> to design one.')}</div>`)); return; }
     const grid = $('<div class="grid"></div>');
     for (const a of agents){
       const card = $('<div class="card" style="cursor:pointer"></div>');
       card.innerHTML = `<div class="row" style="justify-content:space-between"><b>${esc(a.name)}</b>
-        <span class="badge ${a.status==='live'?'live':'paused'}">${a.status}</span></div>
+        <span class="badge ${a.status==='live'?'live':'paused'}">${t(a.status)}</span></div>
         <div class="muted" style="margin:6px 0">${esc(a.goal)}</div>
         <div><span class="pill">${esc(a.tone)}</span><span class="pill">${esc(a.model)}</span><span class="pill">📱 ${esc(a.phoneNumberId)}</span></div>
-        <div class="muted" style="margin-top:8px;font-size:12.5px">Last activity: ${a.lastActivityAt? new Date(a.lastActivityAt).toLocaleString():'—'}</div>`;
+        <div class="muted" style="margin-top:8px;font-size:12.5px">${tf('Last activity: {0}', a.lastActivityAt? new Date(a.lastActivityAt).toLocaleString(locale()):'—')}</div>`;
       card.onclick = ()=>{ view='agent:'+a.id; render(); };
       grid.appendChild(card);
     }
@@ -156,11 +348,11 @@ async function AgentsView(wrap){
 }
 
 async function CatalogView(wrap){
-  wrap.appendChild($('<h1>Catalog</h1>'));
-  wrap.appendChild($('<div class="muted" style="margin-bottom:14px">Curated, ready-to-deploy agents — pick one to launch it on a number instantly.</div>'));
+  wrap.appendChild($(`<h1>${t('Catalog')}</h1>`));
+  wrap.appendChild($(`<div class="muted" style="margin-bottom:14px">${t('Curated, ready-to-deploy agents — pick one to launch it on a number instantly.')}</div>`));
   try {
     const { catalog } = await api('/api/catalog');
-    if (!catalog.length){ wrap.appendChild($('<div class="card muted">The catalog is empty.</div>')); return; }
+    if (!catalog.length){ wrap.appendChild($(`<div class="card muted">${t('The catalog is empty.')}</div>`)); return; }
     const grid = $('<div class="grid"></div>');
     for (const c of catalog){
       const card = $('<div class="card"></div>');
@@ -168,8 +360,8 @@ async function CatalogView(wrap){
         <span class="pill">${esc(c.category)}</span></div>
         <div class="muted" style="margin:6px 0">${esc(c.description)}</div>
         <div><span class="pill">${esc(c.tone)}</span><span class="pill">${esc(c.model)}</span></div>
-        <div class="row" style="margin-top:12px"><button class="primary" data-act="deploy">Deploy</button>
-        <button class="ghost" data-act="preview">Preview spec</button></div>
+        <div class="row" style="margin-top:12px"><button class="primary" data-act="deploy">${t('Deploy')}</button>
+        <button class="ghost" data-act="preview">${t('Preview spec')}</button></div>
         <pre data-spec style="display:none;margin-top:10px"></pre>`;
       const deployBtn = card.querySelector('[data-act=deploy]');
       deployBtn.onclick = async ()=>{ deployBtn.disabled=true;
@@ -186,37 +378,43 @@ async function CatalogView(wrap){
 }
 
 async function AgentDetailView(wrap, id){
-  wrap.appendChild($('<button class="ghost" id="back">← Agents</button>'));
+  wrap.appendChild($(`<button class="ghost" id="back">${t('← Agents')}</button>`));
   wrap.querySelector('#back').onclick=()=>{ view='agents'; render(); };
   let a;
   try { a = await api('/api/agents/'+id); } catch(err){ wrap.appendChild($(`<div class="card err">${esc(err.message)}</div>`)); return; }
   const head = $('<div class="card"></div>');
   head.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(a.name)} <span class="muted" style="font-size:13px">v${a.version}</span></h2>
-    <span class="badge ${a.status==='live'?'live':'paused'}">${a.status}</span></div>
+    <span class="badge ${a.status==='live'?'live':'paused'}">${t(a.status)}</span></div>
     <div class="muted">${esc(a.goal)}</div>
     <div style="margin-top:8px">${a.spec.in_scope_topics.map(t=>`<span class="pill">✓ ${esc(t)}</span>`).join('')}
       ${a.spec.out_of_scope_topics.map(t=>`<span class="pill">✗ ${esc(t)}</span>`).join('')}</div>
     <div style="margin-top:8px"><span class="pill">${esc(a.model)}</span><span class="pill">📱 ${esc(a.phoneNumberId)}</span>
       ${a.spec.tools.map(t=>`<span class="pill">🔧 ${esc(t.name)}</span>`).join('')}</div>
     ${a.spec.workflow.mode==='router'
-      ? `<div style="margin-top:10px"><b>Workflow:</b> router → ${a.spec.sub_agents.length} sub-agents
-         <div style="margin-top:4px">${a.spec.workflow.routes.map(r=>`<span class="pill">🧭 ${esc(r.intent)} → ${esc(r.target)}</span>`).join('')}</div>
+      ? `<div style="margin-top:10px"><b>${t('Workflow:')}</b> ${tf('router → {0} sub-agents', a.spec.sub_agents.length)}
+         <div style="margin-top:4px">${a.spec.workflow.routes.map(r=>`<span class="pill">🧭 ${esc(r.intent)} ${arrow()} ${esc(r.target)}</span>`).join('')}</div>
          <div style="margin-top:4px">${a.spec.sub_agents.map(s=>`<span class="pill">🤖 ${esc(s.name)}${s.tool_names.length?(' ['+s.tool_names.map(esc).join(', ')+']'):''}</span>`).join('')}</div></div>`
-      : `<div style="margin-top:10px muted"><b>Workflow:</b> <span class="muted">single agent</span></div>`}
-    ${(a.spec.skills&&a.spec.skills.length)?`<div style="margin-top:10px"><b>Skills:</b> ${a.spec.skills.map(s=>`<span class="pill" title="${esc(s.description)}">🧩 ${esc(s.name)}</span>`).join('')}</div>`:''}
-    <div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?('<b>Listening on:</b> '+a.listenChats.map(c=>`<span class="pill">💬 ${esc(c.name)}</span>`).join('')):'<span class="muted"><b>Listening on:</b> no chats selected (chosen during creation)</span>'}</div>
-    <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?'Pause':'Resume'}</button>
-    <button class="ghost" id="showspec">View AgentSpec</button>
-    <button id="editchats">✏️ Edit chats</button>
-    ${whatsapp.configured ? `<button id="connectwa" class="${whatsapp.boundAgentId===a.id?'':'primary'}">${whatsapp.boundAgentId===a.id?'✓ Cloud API connected':'📲 Connect Cloud API ('+esc(whatsapp.phoneNumberId)+')'}</button>` : ''}</div>
+      : `<div style="margin-top:10px muted"><b>${t('Workflow:')}</b> <span class="muted">${t('single agent')}</span></div>`}
+    ${(a.spec.skills&&a.spec.skills.length)?`<div style="margin-top:10px"><b>${t('Skills:')}</b> ${a.spec.skills.map(s=>`<span class="pill" title="${esc(s.description)}">🧩 ${esc(s.name)}</span>`).join('')}</div>`:''}
+    <div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?(`<b>${t('Listening on:')}</b> `+a.listenChats.map(c=>`<span class="pill">💬 ${esc(c.name)}</span>`).join('')):`<span class="muted"><b>${t('Listening on:')}</b> ${t('no chats selected (chosen during creation)')}</span>`}</div>
+    <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?t('Pause'):t('Resume')}</button>
+    <button class="ghost" id="showspec">${t('View AgentSpec')}</button>
+    <button id="editchats">${t('✏️ Edit chats')}</button>
+    ${whatsapp.configured ? `<button id="connectwa" class="${whatsapp.boundAgentId===a.id?'':'primary'}">${whatsapp.boundAgentId===a.id?t('✓ Cloud API connected'):tf('📲 Connect Cloud API ({0})', esc(whatsapp.phoneNumberId))}</button>` : ''}
+    <button class="danger" id="delete" style="margin-inline-start:auto">${t('🗑 Delete agent')}</button></div>
     <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>
     <div id="chatedit"></div>`;
   head.querySelector('#toggle').onclick = async ()=>{ await api('/api/agents/'+id+'/'+(a.status==='live'?'pause':'resume'),'POST'); render(); };
+  head.querySelector('#delete').onclick = async ()=>{
+    const ok = await confirmDialog({ title:t('Delete agent?'), message:tf('"{0}" will be permanently removed, along with its number binding and any chats it listens on. This can\'t be undone.', a.name), confirmLabel:t('🗑 Delete agent'), danger:true });
+    if(!ok) return;
+    try{ await api('/api/agents/'+id,'DELETE'); if(whatsapp.boundAgentId===id) whatsapp.boundAgentId=null; view='agents'; render(); }
+    catch(e){ alert(e.message); } };
   head.querySelector('#showspec').onclick = ()=>{ const p=head.querySelector('#spec'); p.style.display = p.style.display==='none'?'block':'none'; };
   head.querySelector('#editchats').onclick = ()=>{ const c=head.querySelector('#chatedit');
     if (c.dataset.open){ c.innerHTML=''; delete c.dataset.open; return; }
     c.dataset.open='1';
-    buildChatPicker(c, a.listenChats||[], 'Save chats', async (chats, btn)=>{ btn.disabled=true;
+    buildChatPicker(c, a.listenChats||[], t('Save chats'), async (chats, btn)=>{ btn.disabled=true;
       try{ await api('/api/agents/'+id+'/chats','POST',{ chats }); render(); }
       catch(e){ alert(e.message); btn.disabled=false; } }); };
   const cw = head.querySelector('#connectwa');
@@ -227,41 +425,41 @@ async function AgentDetailView(wrap, id){
 
   // WhatsApp simulator
   const sim = $('<div class="card"></div>');
-  sim.innerHTML = `<h2>WhatsApp simulator</h2><div class="muted" style="margin-bottom:8px">Sends a real inbound message through the gateway → resolver → cost/abuse breaker → agent runtime → reply. (LLM + WhatsApp transport are stubbed locally.)</div>
+  sim.innerHTML = `<h2>${t('WhatsApp simulator')}</h2><div class="muted" style="margin-bottom:8px">${t('Sends a real inbound message through the gateway → resolver → cost/abuse breaker → agent runtime → reply. (LLM + WhatsApp transport are stubbed locally.)')}</div>
     <div class="chat" id="chat"></div>
-    <div class="composer"><input id="msg" placeholder="Message this agent…"/><button class="primary" id="send">Send</button></div>`;
+    <div class="composer"><input id="msg" placeholder="${t('Message this agent…')}"/><button class="primary" id="send">${t('Send')}</button></div>`;
   wrap.appendChild(sim);
   const chat = sim.querySelector('#chat');
   const from = '+15550000001';
   const addBub = (who, text)=>{ const b=$(`<div class="bub ${who}"></div>`); b.textContent=text; chat.appendChild(b); chat.scrollTop=chat.scrollHeight; };
-  const loadHist = async ()=>{ const {history}=await api('/api/sim/history?agentId='+encodeURIComponent(id)+'&from='+encodeURIComponent(from)); chat.innerHTML=''; history.forEach(m=>addBub(m.role==='user'?'me':'bot', m.content)); if(!history.length) addBub('bot','(no messages yet — say hi)'); };
+  const loadHist = async ()=>{ const {history}=await api('/api/sim/history?agentId='+encodeURIComponent(id)+'&from='+encodeURIComponent(from)); chat.innerHTML=''; history.forEach(m=>addBub(m.role==='user'?'me':'bot', m.content)); if(!history.length) addBub('bot',t('(no messages yet — say hi)')); };
   await loadHist();
   const send = async ()=>{ const inp=sim.querySelector('#msg'); const text=inp.value.trim(); if(!text) return; inp.value=''; addBub('me',text);
     try{ const out = await api('/api/sim/send','POST',{ agentId:id, from, text });
-      if(out.reply) addBub('bot', (out.routedTo && out.routedTo!=='default' ? '🧭 routed → '+out.routedTo+'\n' : '') + out.reply);
-      else addBub('bot','(no reply'+(out.blocked?': '+out.blocked:'')+')'); }
-    catch(err){ addBub('bot','⚠ '+err.message); } };
+      if(out.reply) addBub('bot', (out.routedTo && out.routedTo!=='default' ? tf('🧭 routed → {0}', out.routedTo)+'\n' : '') + out.reply);
+      else addBub('bot', out.blocked?tf('(no reply: {0})', out.blocked):t('(no reply)')); }
+    catch(err){ addBub('bot',tf('⚠ {0}', err.message)); } };
   sim.querySelector('#send').onclick = send;
   sim.querySelector('#msg').addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });
 
   // Self-improvement panel
   const imp = $('<div class="card"></div>');
-  imp.innerHTML = `<h2>Self-improvement</h2><div class="muted" style="margin-bottom:8px">Tell the agent what to improve (optional), then get editable suggestions you approve — approved changes bump the version. Leave blank to suggest from recent chats.</div>
-    <textarea id="suggestguide" rows="2" placeholder="e.g. be more formal; stop answering legal questions; add our refund policy"></textarea>
-    <button id="suggest" style="margin-top:6px">Suggest improvements</button><div id="sugg" style="margin-top:10px"></div>`;
+  imp.innerHTML = `<h2>${t('Self-improvement')}</h2><div class="muted" style="margin-bottom:8px">${t('Tell the agent what to improve (optional), then get editable suggestions you approve — approved changes bump the version. Leave blank to suggest from recent chats.')}</div>
+    <textarea id="suggestguide" rows="2" placeholder="${t('e.g. be more formal; stop answering legal questions; add our refund policy')}"></textarea>
+    <button id="suggest" style="margin-top:6px">${t('Suggest improvements')}</button><div id="sugg" style="margin-top:10px"></div>`;
   wrap.appendChild(imp);
-  imp.querySelector('#suggest').onclick = async ()=>{ const box=imp.querySelector('#sugg'); const instruction=imp.querySelector('#suggestguide').value.trim(); box.innerHTML='<span class="muted">'+(instruction?'Drafting improvements…':'Analyzing transcripts…')+'</span>';
+  imp.querySelector('#suggest').onclick = async ()=>{ const box=imp.querySelector('#sugg'); const instruction=imp.querySelector('#suggestguide').value.trim(); box.innerHTML='<span class="muted">'+(instruction?t('Drafting improvements…'):t('Analyzing transcripts…'))+'</span>';
     try{ const r = await api('/api/agents/'+id+'/suggest','POST',{ instruction });
-      if(!r.suggestions.length){ box.innerHTML='<span class="muted">'+esc(r.summary)+' Add guidance above, or chat with the agent first.</span>'; return; }
+      if(!r.suggestions.length){ box.innerHTML='<span class="muted">'+tf('{0} Add guidance above, or chat with the agent first.', esc(r.summary))+'</span>'; return; }
       box.innerHTML = '<div class="muted" style="margin-bottom:8px">'+esc(r.summary)+'</div>';
       r.suggestions.forEach((s,i)=>{ const row=$('<label style="display:block;margin:6px 0"></label>');
         row.innerHTML = `<input type="checkbox" data-i="${i}" checked/> <b>${esc(s.kind)}</b> — ${esc(s.value)} <span class="muted">(${esc(s.rationale)})</span>`;
         box.appendChild(row); });
-      const apply=$('<button class="primary" style="margin-top:10px">Apply selected</button>');
+      const apply=$(`<button class="primary" style="margin-top:10px">${t('Apply selected')}</button>`);
       apply.onclick = async ()=>{ apply.disabled=true;
         const chosen=[...box.querySelectorAll('input[type=checkbox]')].filter(c=>c.checked).map(c=>r.suggestions[+c.dataset.i]);
         const res = await api('/api/agents/'+id+'/apply','POST',{ suggestions: chosen });
-        box.appendChild($(`<div class="ok" style="margin-top:8px">Applied — agent is now v${res.version}. Reloading…</div>`));
+        box.appendChild($(`<div class="ok" style="margin-top:8px">${tf('Applied — agent is now v{0}. Reloading…', res.version)}</div>`));
         setTimeout(()=>render(),800); };
       box.appendChild(apply);
     }catch(err){ box.innerHTML='<span class="err">'+esc(err.message)+'</span>'; } };
@@ -271,27 +469,27 @@ async function AgentDetailView(wrap, id){
     if(ext.kind==='context') return ext.knowledge.map(k=>`<div><span class="pill">📎 ${esc(k.label)} · ${esc(k.type)}</span></div><pre style="white-space:pre-wrap;max-height:160px;overflow:auto">${esc(k.content)}</pre>`).join('');
     if(ext.kind==='skill') return `<div><b>🧩 ${esc(ext.skill.name)}</b><div class="muted">${esc(ext.skill.description)}</div><pre style="white-space:pre-wrap;max-height:220px;overflow:auto">${esc(ext.skill.instructions)}</pre></div>`;
     if(ext.kind==='workflow') return `<div><b>🤖 ${esc(ext.subAgent.name)}</b> <span class="muted">(${esc(ext.subAgent.id)})</span><div class="muted">${esc(ext.subAgent.specialty)}</div>
-      <div style="margin-top:4px"><span class="pill">🧭 ${esc(ext.route.intent)} → ${esc(ext.route.target)}</span> ${(ext.newTools||[]).map(t=>`<span class="pill">🔧 ${esc(t.name)}</span>`).join('')}</div></div>`;
+      <div style="margin-top:4px"><span class="pill">🧭 ${esc(ext.route.intent)} ${arrow()} ${esc(ext.route.target)}</span> ${(ext.newTools||[]).map(t=>`<span class="pill">🔧 ${esc(t.name)}</span>`).join('')}</div></div>`;
     return '';
   }
   function showExtensionConfirm(container, ext, repropose){
     container.innerHTML='';
     const card=$('<div class="card" style="border-color:var(--accent)"></div>');
-    card.innerHTML=`<h2>Confirm — ${esc(ext.kind)}</h2><div class="muted" style="margin-bottom:8px">${esc(ext.summary||'')}</div><div id="detail"></div>`;
+    card.innerHTML=`<h2>${tf('Confirm — {0}', esc(ext.kind))}</h2><div class="muted" style="margin-bottom:8px">${esc(ext.summary||'')}</div><div id="detail"></div>`;
     card.querySelector('#detail').innerHTML=renderExtDetail(ext);
-    const confirm=$('<button class="primary" style="margin-top:10px">Confirm</button>');
+    const confirm=$(`<button class="primary" style="margin-top:10px">${t('Confirm')}</button>`);
     confirm.onclick=async()=>{ confirm.disabled=true;
       try{ const r=await api('/api/agents/'+id+'/extend/apply','POST',{ extension: ext });
-        card.appendChild($(`<div class="ok" style="margin-top:8px">Applied — agent is now v${r.version}. Reloading…</div>`)); setTimeout(()=>render(),800); }
+        card.appendChild($(`<div class="ok" style="margin-top:8px">${tf('Applied — agent is now v{0}. Reloading…', r.version)}</div>`)); setTimeout(()=>render(),800); }
       catch(e){ card.appendChild($(`<div class="err" style="margin-top:8px">${esc(e.message)}</div>`)); confirm.disabled=false; } };
     card.appendChild(confirm);
     if(repropose){
       const ask=$('<div style="margin-top:12px"></div>');
-      ask.appendChild($('<label>Ask changes</label>'));
-      const ta=$('<textarea rows="2" placeholder="e.g. shorten it / add a step about refunds / rename the sub-agent"></textarea>'); ask.appendChild(ta);
-      const ab=$('<button style="margin-top:6px">Ask Changes</button>');
-      ab.onclick=async()=>{ const t=ta.value.trim(); if(!t)return; ab.disabled=true; card.querySelector('#detail').innerHTML='<span class="muted">Re-drafting…</span>';
-        try{ const next=await repropose(t, ext); showExtensionConfirm(container, next, repropose); }
+      ask.appendChild($(`<label>${t('Ask changes')}</label>`));
+      const ta=$(`<textarea rows="2" placeholder="${t('e.g. shorten it / add a step about refunds / rename the sub-agent')}"></textarea>`); ask.appendChild(ta);
+      const ab=$(`<button style="margin-top:6px">${t('Ask Changes')}</button>`);
+      ab.onclick=async()=>{ const tx=ta.value.trim(); if(!tx)return; ab.disabled=true; card.querySelector('#detail').innerHTML=`<span class="muted">${t('Re-drafting…')}</span>`;
+        try{ const next=await repropose(tx, ext); showExtensionConfirm(container, next, repropose); }
         catch(e){ card.querySelector('#detail').innerHTML='<span class="err">'+esc(e.message)+'</span>'; ab.disabled=false; } };
       ask.appendChild(ab); card.appendChild(ask);
     }
@@ -299,59 +497,59 @@ async function AgentDetailView(wrap, id){
   }
 
   const ext = $('<div class="card"></div>');
-  ext.innerHTML=`<h2>Extend agent</h2><div class="muted" style="margin-bottom:8px">Add context, a skill, or a workflow. Each change is drafted → you review it → Confirm (the agent version bumps).</div>
-    <div style="margin-bottom:12px"><b>Add context</b>
-      <textarea id="ctxdesc" rows="2" placeholder="Describe context for Claude to add…"></textarea>
-      <div class="row" style="margin-top:6px"><button id="ctxdraft">Draft from description</button></div>
+  ext.innerHTML=`<h2>${t('Extend agent')}</h2><div class="muted" style="margin-bottom:8px">${t('Add context, a skill, or a workflow. Each change is drafted → you review it → Confirm (the agent version bumps).')}</div>
+    <div style="margin-bottom:12px"><b>${t('Add context')}</b>
+      <textarea id="ctxdesc" rows="2" placeholder="${t('Describe context for Claude to add…')}"></textarea>
+      <div class="row" style="margin-top:6px"><button id="ctxdraft">${t('Draft from description')}</button></div>
       <div class="row" style="margin-top:6px"><input type="file" id="ctxfile" accept=".txt,.md,.markdown,.csv,.json,.text" style="flex:1"/>
-        <input id="ctxurl" placeholder="https://… (fetch a page)" style="flex:1"/><button id="ctxurlbtn">Add URL</button></div></div>
-    <div style="margin-bottom:12px"><b>Add skill</b> <span class="muted">(Claude Agent Skill)</span>
-      <textarea id="skilldesc" rows="2" placeholder="What should the skill do, and when should it trigger?"></textarea>
-      <button id="skilldraft" style="margin-top:6px">Draft skill</button></div>
-    <div style="margin-bottom:4px"><b>Add workflow</b> <span class="muted">(router sub-agent)</span>
-      <textarea id="wfdesc" rows="2" placeholder="Describe a new task area / sub-agent…"></textarea>
-      <button id="wfdraft" style="margin-top:6px">Draft workflow</button></div>
+        <input id="ctxurl" placeholder="${t('https://… (fetch a page)')}" style="flex:1"/><button id="ctxurlbtn">${t('Add URL')}</button></div></div>
+    <div style="margin-bottom:12px"><b>${t('Add skill')}</b> <span class="muted">${t('(Claude Agent Skill)')}</span>
+      <textarea id="skilldesc" rows="2" placeholder="${t('What should the skill do, and when should it trigger?')}"></textarea>
+      <button id="skilldraft" style="margin-top:6px">${t('Draft skill')}</button></div>
+    <div style="margin-bottom:4px"><b>${t('Add workflow')}</b> <span class="muted">${t('(router sub-agent)')}</span>
+      <textarea id="wfdesc" rows="2" placeholder="${t('Describe a new task area / sub-agent…')}"></textarea>
+      <button id="wfdraft" style="margin-top:6px">${t('Draft workflow')}</button></div>
     <div id="extout" style="margin-top:10px"></div>`;
   wrap.appendChild(ext);
   const out = ext.querySelector('#extout');
   const proposeFor = (kind)=> (instruction, prior)=> api('/api/agents/'+id+'/extend/propose','POST',{ kind, instruction, prior: prior||null }).then(r=>r.extension);
-  async function draft(kind, text){ if(!text.trim()) return; out.innerHTML='<span class="muted">Drafting…</span>';
+  async function draft(kind, text){ if(!text.trim()) return; out.innerHTML=`<span class="muted">${t('Drafting…')}</span>`;
     try{ const e=await proposeFor(kind)(text, null); showExtensionConfirm(out, e, proposeFor(kind)); }
     catch(err){ out.innerHTML='<span class="err">'+esc(err.message)+'</span>'; } }
   ext.querySelector('#ctxdraft').onclick=()=>draft('context', ext.querySelector('#ctxdesc').value);
   ext.querySelector('#skilldraft').onclick=()=>draft('skill', ext.querySelector('#skilldesc').value);
   ext.querySelector('#wfdraft').onclick=()=>draft('workflow', ext.querySelector('#wfdesc').value);
-  ext.querySelector('#ctxurlbtn').onclick=async()=>{ const u=ext.querySelector('#ctxurl').value.trim(); if(!u)return; out.innerHTML='<span class="muted">Fetching…</span>';
+  ext.querySelector('#ctxurlbtn').onclick=async()=>{ const u=ext.querySelector('#ctxurl').value.trim(); if(!u)return; out.innerHTML=`<span class="muted">${t('Fetching…')}</span>`;
     try{ const r=await api('/api/agents/'+id+'/extend/context-url','POST',{ url:u }); showExtensionConfirm(out, r.extension, proposeFor('context')); }
     catch(err){ out.innerHTML='<span class="err">'+esc(err.message)+'</span>'; } };
   ext.querySelector('#ctxfile').onchange=(e)=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader();
-    rd.onload=async()=>{ out.innerHTML='<span class="muted">Reading "'+esc(f.name)+'"…</span>';
+    rd.onload=async()=>{ out.innerHTML=`<span class="muted">${tf('Reading "{0}"…', esc(f.name))}</span>`;
       try{ const r=await api('/api/agents/'+id+'/extend/context-file','POST',{ label:f.name, text:String(rd.result||'').slice(0,12000) }); showExtensionConfirm(out, r.extension, proposeFor('context')); }
       catch(err){ out.innerHTML='<span class="err">'+esc(err.message)+'</span>'; } };
     rd.readAsText(f); };
 }
 
 async function WhatsAppView(wrap){
-  wrap.appendChild($('<h1>WhatsApp — link your number (QR)</h1>'));
-  wrap.appendChild($('<div class="card" style="border-color:#8a6d3b">⚠️ <b>POC only.</b> This links your <i>personal</i> WhatsApp via the unofficial WhatsApp-Web protocol — against WhatsApp\'s ToS, with a real risk of the number being banned. Prefer a spare SIM. The Cloud API path is the production-safe option.</div>'));
+  wrap.appendChild($(`<h1>${t('WhatsApp — link your number (QR)')}</h1>`));
+  wrap.appendChild($(`<div class="card" style="border-color:#8a6d3b">${t('⚠️ <b>POC only.</b> This links your <i>personal</i> WhatsApp via the unofficial WhatsApp-Web protocol — against WhatsApp\'s ToS, with a real risk of the number being banned. Prefer a spare SIM. The Cloud API path is the production-safe option.')}</div>`));
   const card = $('<div class="card"></div>');
   wrap.appendChild(card);
   async function refresh(){
     let s; try { s = await api('/api/wa/status'); } catch(e){ card.innerHTML = '<span class="err">'+esc(e.message)+'</span>'; return; }
     if (s.status === 'connected'){
-      card.innerHTML = `<div class="ok" style="font-size:16px">✓ Linked${s.me?(' as +'+esc(s.me)):''}</div>
-        <div class="muted" style="margin-top:8px">Each agent replies only in the chats picked during its creation. Use <b>+ Create agent</b> and select its chats.</div>
-        <div class="muted" style="margin-top:6px">Then message <b>+${esc(s.me||'your number')}</b> from a selected chat — the agent (WAT + Claude) replies; unselected chats are ignored.</div>`;
+      card.innerHTML = `<div class="ok" style="font-size:16px">${s.me?tf('✓ Linked as +{0}', esc(s.me)):t('✓ Linked')}</div>
+        <div class="muted" style="margin-top:8px">${t('Each agent replies only in the chats picked during its creation. Use <b>+ Create agent</b> and select its chats.')}</div>
+        <div class="muted" style="margin-top:6px">${tf('Then message <b>+{0}</b> from a selected chat — the agent (WAT + Claude) replies; unselected chats are ignored.', esc(s.me||t('your number')))}</div>`;
       if (waPollTimer){ clearInterval(waPollTimer); waPollTimer=null; }
     } else if (s.status === 'qr' && s.qrDataUrl){
-      card.innerHTML = `<div>On your phone: <b>WhatsApp → Settings → Linked devices → Link a device</b>, then scan this code:</div>
-        <img alt="WhatsApp QR" src="${s.qrDataUrl}" style="width:264px;height:264px;background:#fff;border-radius:8px;margin-top:12px"/>
-        <div class="muted" style="margin-top:8px">Waiting for the scan… (the code refreshes automatically)</div>`;
+      card.innerHTML = `<div>${t('On your phone: <b>WhatsApp → Settings → Linked devices → Link a device</b>, then scan this code:')}</div>
+        <img alt="${t('WhatsApp QR')}" src="${s.qrDataUrl}" style="width:264px;height:264px;background:#fff;border-radius:8px;margin-top:12px"/>
+        <div class="muted" style="margin-top:8px">${t('Waiting for the scan… (the code refreshes automatically)')}</div>`;
     } else if (s.status === 'connecting'){
-      card.innerHTML = '<span class="muted">Connecting to WhatsApp… generating QR…</span>';
+      card.innerHTML = `<span class="muted">${t('Connecting to WhatsApp… generating QR…')}</span>`;
     } else {
       card.innerHTML = '';
-      const b = $('<button class="primary">Link my WhatsApp</button>');
+      const b = $(`<button class="primary">${t('Link my WhatsApp')}</button>`);
       b.onclick = async ()=>{ b.disabled=true; try{ await api('/api/wa/link','POST'); refresh(); }catch(e){ card.innerHTML='<span class="err">'+esc(e.message)+'</span>'; } };
       card.appendChild(b);
     }
@@ -361,19 +559,19 @@ async function WhatsAppView(wrap){
 }
 
 async function ActivityView(wrap){
-  wrap.appendChild($('<h1>Activity</h1>'));
-  wrap.appendChild($('<div class="muted" style="margin-bottom:14px">Live feed of inbound → routing → reply across your tenant\'s agents (simulator 🧪 + WhatsApp 📱). Newest first, refreshes automatically.</div>'));
+  wrap.appendChild($(`<h1>${t('Activity')}</h1>`));
+  wrap.appendChild($(`<div class="muted" style="margin-bottom:14px">${t('Live feed of inbound → routing → reply across your tenant\'s agents (simulator 🧪 + WhatsApp 📱). Newest first, refreshes automatically.')}</div>`));
   const card=$('<div class="card"></div>'); wrap.appendChild(card);
   async function refresh(){
     let r; try{ r=await api('/api/activity'); }catch(e){ card.innerHTML='<span class="err">'+esc(e.message)+'</span>'; return; }
-    if(!r.events.length){ card.innerHTML='<span class="muted">No activity yet. Use an agent\'s simulator, or message a linked chat.</span>'; return; }
+    if(!r.events.length){ card.innerHTML=`<span class="muted">${t('No activity yet. Use an agent\'s simulator, or message a linked chat.')}</span>`; return; }
     card.innerHTML = r.events.map(e=>{
-      const when=new Date(e.ts).toLocaleTimeString();
+      const when=new Date(e.ts).toLocaleTimeString(locale());
       const ch = e.channel==='whatsapp'?'📱':'🧪';
-      const route = e.blocked ? '<span class="err">⛔ '+esc(e.blocked)+'</span>' : (e.routedTo && e.routedTo!=='default' ? '🧭 '+esc(e.routedTo) : '<span class="muted">default</span>');
-      const reply = e.reply ? esc(e.reply.slice(0,200)) : '<span class="muted">(no reply)</span>';
+      const route = e.blocked ? '<span class="err">⛔ '+esc(e.blocked)+'</span>' : (e.routedTo && e.routedTo!=='default' ? '🧭 '+esc(e.routedTo) : `<span class="muted">${t('default')}</span>`);
+      const reply = e.reply ? esc(e.reply.slice(0,200)) : `<span class="muted">${t('(no reply)')}</span>`;
       return `<div style="border-bottom:1px solid var(--line);padding:8px 0">
-        <div class="muted" style="font-size:12px">${when} · ${ch} <b>${esc(e.agentName)}</b> · from ${esc(e.from)}${e.chatId?(' · '+esc(String(e.chatId).split('@')[0])):''} · ${route}</div>
+        <div class="muted" style="font-size:12px">${when} · ${ch} <b>${esc(e.agentName)}</b> · ${tf('from {0}', esc(e.from))}${e.chatId?(' · '+esc(String(e.chatId).split('@')[0])):''} · ${route}</div>
         <div style="margin-top:2px">“${esc(e.text.slice(0,200))}”</div>
         <div style="margin-top:2px">↳ ${reply}</div></div>`;
     }).join('');
@@ -404,46 +602,46 @@ async function buildChatPicker(container, preselected, saveLabel, onSave){
   const box=$('<div class="card" style="margin-top:8px"></div>'); container.appendChild(box);
   let st; try{ st=await api('/api/wa/status'); }catch{ st={status:'disconnected'}; }
   if (st.status!=='connected'){
-    box.innerHTML='<div class="muted">Your WhatsApp isn\'t linked yet — link it to choose chats.</div>';
-    const lb=$('<button class="primary" style="margin-top:8px">Link my WhatsApp</button>');
+    box.innerHTML=`<div class="muted">${t('Your WhatsApp isn\'t linked yet — link it to choose chats.')}</div>`;
+    const lb=$(`<button class="primary" style="margin-top:8px">${t('Link my WhatsApp')}</button>`);
     lb.onclick=async()=>{ lb.disabled=true; try{ await api('/api/wa/link','POST'); }catch{}
       const poll=setInterval(async()=>{ let s; try{ s=await api('/api/wa/status'); }catch{ return; }
-        if(s.status==='qr'&&s.qrDataUrl){ box.innerHTML='<div>Scan in WhatsApp → Settings → Linked devices → Link a device:</div><img alt="QR" src="'+s.qrDataUrl+'" style="width:240px;height:240px;background:#fff;border-radius:8px;margin-top:8px"/>'; }
+        if(s.status==='qr'&&s.qrDataUrl){ box.innerHTML=`<div>${t('Scan in WhatsApp → Settings → Linked devices → Link a device:')}</div><img alt="${t('WhatsApp QR')}" src="`+s.qrDataUrl+'" style="width:240px;height:240px;background:#fff;border-radius:8px;margin-top:8px"/>'; }
         if(s.status==='connected'){ clearInterval(poll); buildChatPicker(container, preselected, saveLabel, onSave); } }, 2500); };
     box.appendChild(lb); return;
   }
   const selected=new Map((preselected||[]).map(c=>[c.id,{id:c.id,name:c.name,isGroup:String(c.id).endsWith('@g.us')}]));
-  box.innerHTML='<b>Which chats should this agent answer?</b><div class="muted" style="margin:4px 0 8px">Search your contacts and groups by name or number, then tick the ones to listen on.</div>';
-  const search=$('<input placeholder="Search chats/contacts…"/>'); box.appendChild(search);
+  box.innerHTML=`<b>${t('Which chats should this agent answer?')}</b><div class="muted" style="margin:4px 0 8px">${t('Search your contacts and groups by name or number, then tick the ones to listen on.')}</div>`;
+  const search=$(`<input placeholder="${t('Search chats/contacts…')}"/>`); box.appendChild(search);
   const chips=$('<div style="margin:8px 0"></div>'); box.appendChild(chips);
   const results=$('<div style="max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px;margin-top:6px"></div>'); box.appendChild(results);
   const save=$('<button class="primary" style="margin-top:10px" disabled></button>'); save.textContent=saveLabel; box.appendChild(save);
   function renderChips(){ chips.innerHTML='';
-    if(!selected.size){ chips.appendChild($('<span class="muted">none selected yet</span>')); save.disabled=true; return; }
+    if(!selected.size){ chips.appendChild($(`<span class="muted">${t('none selected yet')}</span>`)); save.disabled=true; return; }
     [...selected.values()].forEach(c=>{ const pill=$('<span class="pill" style="display:inline-flex;align-items:center;gap:5px;margin:2px"></span>');
-      pill.appendChild(avatarEl(c,18)); const t=$('<span dir="auto"></span>'); t.textContent=c.name; pill.appendChild(t);
+      pill.appendChild(avatarEl(c,18)); const tn=$('<span dir="auto"></span>'); tn.textContent=c.name; pill.appendChild(tn);
       if(c.isGroup) pill.appendChild($('<span>👥</span>')); chips.appendChild(pill); });
     save.disabled=false; }
   async function doSearch(){ let r; try{ r=await api('/api/wa/chats?q='+encodeURIComponent(search.value.trim())); }catch{ r={chats:[]}; }
-    results.innerHTML = r.chats.length ? '' : '<span class="muted">No matches (try a name or number; chats appear after they sync).</span>';
+    results.innerHTML = r.chats.length ? '' : `<span class="muted">${t('No matches (try a name or number; chats appear after they sync).')}</span>`;
     r.chats.forEach(c=>{ const row=$('<label style="display:flex;align-items:center;gap:8px;padding:5px 2px;cursor:pointer"></label>');
       const cb=$('<input type="checkbox"/>'); cb.checked=selected.has(c.id);
       const name=$('<span dir="auto" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>'); name.textContent=c.name;
       row.appendChild(cb); row.appendChild(avatarEl(c,32)); row.appendChild(name);
-      if(c.isGroup) row.appendChild($('<span class="pill" title="Group" style="flex:0 0 auto">👥</span>'));
+      if(c.isGroup) row.appendChild($(`<span class="pill" title="${t('Group')}" style="flex:0 0 auto">👥</span>`));
       cb.onchange=(e)=>{ if(e.target.checked) selected.set(c.id,{id:c.id,name:c.name,isGroup:c.isGroup}); else selected.delete(c.id); renderChips(); };
       results.appendChild(row); }); }
-  let t; search.addEventListener('input', ()=>{ clearTimeout(t); t=setTimeout(doSearch, 300); });
+  let tm; search.addEventListener('input', ()=>{ clearTimeout(tm); tm=setTimeout(doSearch, 300); });
   save.onclick=()=> onSave([...selected.values()].map(c=>({id:c.id,name:c.name})), save);
   renderChips(); doSearch();
 }
 
 async function CreateView(wrap){
-  wrap.appendChild($('<h1>Create a new agent</h1>'));
-  wrap.appendChild($('<div class="muted" style="margin-bottom:12px">Answer a few questions — Whaser assembles a precise, validated agent spec. (This is Whaser\'s differentiator: a conversation, not a flow canvas.)</div>'));
+  wrap.appendChild($(`<h1>${t('Create a new agent')}</h1>`));
+  wrap.appendChild($(`<div class="muted" style="margin-bottom:12px">${t('Answer a few questions — Whaser assembles a precise, validated agent spec. (This is Whaser\'s differentiator: a conversation, not a flow canvas.)')}</div>`));
   const card = $('<div class="card"></div>');
   card.innerHTML = `<div class="chat" id="chat"></div>
-    <div class="composer"><input id="msg" placeholder="Type your answer…" disabled/><button class="primary" id="send" disabled>Send</button></div>
+    <div class="composer"><input id="msg" placeholder="${t('Type your answer…')}" disabled/><button class="primary" id="send" disabled>${t('Send')}</button></div>
     <div id="actions" style="margin-top:12px"></div>`;
   wrap.appendChild(card);
   const chat=card.querySelector('#chat'), input=card.querySelector('#msg'), sendBtn=card.querySelector('#send'), actions=card.querySelector('#actions');
@@ -455,7 +653,7 @@ async function CreateView(wrap){
     sessionId=s.sessionId; addBub('bot', s.greeting);
     if (s.prompt.kind==='ask') addBub('bot', s.prompt.question);
     input.disabled=false; sendBtn.disabled=false; input.focus();
-  } catch(err){ addBub('bot','⚠ '+err.message); return; }
+  } catch(err){ addBub('bot',tf('⚠ {0}', err.message)); return; }
 
   function handlePrompt(p){
     if (p.kind==='ask'){ addBub('bot', p.question); }
@@ -467,31 +665,31 @@ async function CreateView(wrap){
   };
 
   function renderChatPicker(){
-    buildChatPicker(actions, [], 'Continue', async (chats)=>{
-      addBub('me','Listen on: '+chats.map(c=>c.name).join(', '));
+    buildChatPicker(actions, [], t('Continue'), async (chats)=>{
+      addBub('me',tf('Listen on: {0}', chats.map(c=>c.name).join(', ')));
       const r=await api('/api/wizard/select-chats','POST',{ sessionId, chats });
       actions.innerHTML=''; handlePrompt(r.prompt);
     });
   }
-  sendBtn.onclick = ()=> ask().catch(e=>addBub('bot','⚠ '+e.message));
+  sendBtn.onclick = ()=> ask().catch(e=>addBub('bot',tf('⚠ {0}', e.message)));
   input.addEventListener('keydown', e=>{ if(e.key==='Enter') sendBtn.onclick(); });
 
   function showBuild(){
     actions.innerHTML='';
-    const b=$('<button class="primary">Build the agent</button>');
+    const b=$(`<button class="primary">${t('Build the agent')}</button>`);
     b.onclick = async ()=>{ b.disabled=true; try{
       const r = await api('/api/wizard/finalize','POST',{ sessionId });
       const box=$('<div class="card" style="margin-top:8px"></div>');
-      const status = r.publishable ? '<span class="ok">✓ valid & consistent — ready to publish</span>'
-        : '<span class="err">needs attention</span>';
-      box.innerHTML = `<h2>Generated AgentSpec</h2><div style="margin-bottom:8px">${status}</div>
-        ${r.schemaErrors.length?`<div class="err">Schema: ${r.schemaErrors.map(esc).join('; ')}</div>`:''}
-        ${r.issues.length?`<div class="err">Consistency: ${r.issues.map(i=>esc(i.message)).join('; ')}</div>`:''}
+      const status = r.publishable ? `<span class="ok">${t('✓ valid & consistent — ready to publish')}</span>`
+        : `<span class="err">${t('needs attention')}</span>`;
+      box.innerHTML = `<h2>${t('Generated AgentSpec')}</h2><div style="margin-bottom:8px">${status}</div>
+        ${r.schemaErrors.length?`<div class="err">${tf('Schema: {0}', r.schemaErrors.map(esc).join('; '))}</div>`:''}
+        ${r.issues.length?`<div class="err">${tf('Consistency: {0}', r.issues.map(i=>esc(i.message)).join('; '))}</div>`:''}
         <pre>${esc(JSON.stringify(r.spec,null,2))}</pre>`;
       actions.appendChild(box);
-      if (r.publishable){ const p=$('<button class="primary" style="margin-top:10px">Publish & bind a number</button>');
+      if (r.publishable){ const p=$(`<button class="primary" style="margin-top:10px">${t('Publish & bind a number')}</button>`);
         p.onclick = async ()=>{ p.disabled=true; const pub=await api('/api/wizard/publish','POST',{ sessionId });
-          actions.appendChild($(`<div class="ok" style="margin-top:10px">Published as ${esc(pub.agentId)} on ${esc(pub.phoneNumberId)}. Opening…</div>`));
+          actions.appendChild($(`<div class="ok" style="margin-top:10px">${tf('Published as {0} on {1}. Opening…', esc(pub.agentId), esc(pub.phoneNumberId))}</div>`));
           setTimeout(()=>{ view='agent:'+pub.agentId; render(); }, 700); };
         actions.appendChild(p);
       }

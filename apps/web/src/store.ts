@@ -453,6 +453,21 @@ export class AppState {
     return a;
   }
 
+  /** Permanently remove an agent: unbind its number + chat allow-list, drop its conversation
+   *  state (transcripts + per-sender history), clear the Cloud-API binding if it points here, persist. */
+  async deleteAgent(id: string, tenantId: string): Promise<boolean> {
+    const agent = this.getAgent(id, tenantId);
+    if (!agent) return false;
+    this.resolver.unbind(agent.phoneNumberId);
+    for (const c of agent.listenChats) this.resolver.unbind(this.chatKey(tenantId, c.id));
+    this.agents.delete(id);
+    this.transcripts.delete(id);
+    await this.conversations.purge(id);
+    if (this.boundAgentId === id) this.boundAgentId = null;
+    this.persist();
+    return true;
+  }
+
   // --- WhatsApp simulator (exercises the real gateway pipeline) ---
   async simulateInbound(agentId: string, tenantId: string, from: string, text: string): Promise<{ reply: string | null; blocked: string | null; status: string; routedTo: string | null } | null> {
     const agent = this.getAgent(agentId, tenantId);

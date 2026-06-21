@@ -223,6 +223,14 @@ app.get('/api/agents/:id', wrap(async (req, res, auth) => {
   res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername, listenChats: a.listenChats });
 }));
 
+app.delete('/api/agents/:id', wrap(async (req, res, auth) => {
+  if (!(await state.deleteAgent(req.params.id, auth.tenantId))) {
+    res.sendStatus(404);
+    return;
+  }
+  res.json({ ok: true });
+}));
+
 // --- Catalog (global, curated; deploy-as-is into the caller's tenant) ---
 app.get('/api/catalog', wrap(async (_req, res) => {
   res.json({ catalog: state.listCatalog().map(catalogSummary) });

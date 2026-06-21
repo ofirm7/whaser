@@ -7,6 +7,8 @@ import type { RuntimeMessage } from './agentRuntime';
 export interface ConversationStore {
   history(key: string): Promise<RuntimeMessage[]>;
   append(key: string, ...messages: RuntimeMessage[]): Promise<void>;
+  /** Drop every thread for an agent (all conversationKey(agentId, *) entries) — used on agent delete. */
+  purge(agentId: string): Promise<void>;
 }
 
 /** Stable key for a conversation thread. */
@@ -30,5 +32,10 @@ export class InMemoryConversationStore implements ConversationStore {
   async append(key: string, ...messages: RuntimeMessage[]): Promise<void> {
     const next = [...(this.store.get(key) ?? []), ...messages];
     this.store.set(key, next.slice(-this.maxMessages));
+  }
+
+  async purge(agentId: string): Promise<void> {
+    const prefix = `${agentId}:`;
+    for (const key of this.store.keys()) if (key.startsWith(prefix)) this.store.delete(key);
   }
 }
