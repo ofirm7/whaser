@@ -193,6 +193,9 @@ const I18N = { he: {
     "⚠ {0}": "⚠ {0}",
     "⚠️ <b>POC only.</b> This links your <i>personal</i> WhatsApp via the unofficial WhatsApp-Web protocol — against WhatsApp's ToS, with a real risk of the number being banned. Prefer a spare SIM. The Cloud API path is the production-safe option.": "⚠️ <b>הדגמה בלבד.</b> זה מקשר את ה-WhatsApp <i>האישי</i> שלכם דרך פרוטוקול WhatsApp-Web הלא-רשמי — בניגוד לתנאי השימוש של WhatsApp, עם סיכון ממשי לחסימת המספר. עדיף להשתמש ב-SIM חלופי. נתיב ה-Cloud API הוא האפשרות הבטוחה לסביבת ייצור.",
     "✏️ Edit chats": "✏️ עריכת צ׳אטים",
+    "🙋 Answer my own messages: On": "🙋 לענות גם להודעות שלי: פעיל",
+    "🙋 Answer my own messages: Off": "🙋 לענות גם להודעות שלי: כבוי",
+    "When on, the agent also replies to messages YOU send from your connected WhatsApp.": "כשמופעל, הסוכן עונה גם להודעות שאתם שולחים מה-WhatsApp המחובר.",
     "✓ Cloud API connected": "✓ Cloud API מחובר",
     "✓ Linked": "✓ מקושר",
     "✓ Linked as +{0}": "✓ מקושר בתור +{0}",
@@ -518,11 +521,13 @@ async function AgentDetailView(wrap, id){
     <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?t('Pause'):t('Resume')}</button>
     <button class="ghost" id="showspec">${t('View AgentSpec')}</button>
     <button id="editchats">${t('✏️ Edit chats')}</button>
+    <button id="answerself" class="${a.answerSelf?'primary':''}" title="${t('When on, the agent also replies to messages YOU send from your connected WhatsApp.')}">${a.answerSelf?t('🙋 Answer my own messages: On'):t('🙋 Answer my own messages: Off')}</button>
     ${whatsapp.configured ? `<button id="connectwa" class="${whatsapp.boundAgentId===a.id?'':'primary'}">${whatsapp.boundAgentId===a.id?t('✓ Cloud API connected'):tf('📲 Connect Cloud API ({0})', esc(whatsapp.phoneNumberId))}</button>` : ''}
     <button class="danger" id="delete" style="margin-inline-start:auto">${t('🗑 Delete agent')}</button></div>
     <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>
     <div id="chatedit"></div>`;
   head.querySelector('#toggle').onclick = async ()=>{ await api('/api/agents/'+id+'/'+(a.status==='live'?'pause':'resume'),'POST'); render(); };
+  head.querySelector('#answerself').onclick = async ()=>{ try{ await api('/api/agents/'+id+'/answer-self','POST',{ enabled: !a.answerSelf }); render(); }catch(e){ alert(e.message); } };
   head.querySelector('#delete').onclick = async ()=>{
     const ok = await confirmDialog({ title:t('Delete agent?'), message:tf('"{0}" will be permanently removed, along with its number binding and any chats it listens on. This can\'t be undone.', a.name), confirmLabel:t('🗑 Delete agent'), danger:true });
     if(!ok) return;

@@ -102,6 +102,8 @@ export interface StoredAgent {
   phoneNumberId: string;
   /** WhatsApp chats this agent listens on (allow-list). Empty = simulator-only. */
   listenChats: ChatRef[];
+  /** "Answer myself": also reply to messages the owner sends from the connected number (default off). */
+  answerSelf?: boolean;
   /** Scheduled actions that fire automatically on a cadence. Absent until the owner adds one. */
   triggers?: AgentTrigger[];
   createdAt: number;
@@ -276,7 +278,14 @@ export class AppState {
   }
 
   /** Run an inbound message from a tenant's personal WhatsApp through the WAT pipeline. */
-  async handleChannelInbound(tenantId: string, jid: string, from: string, text: string, media?: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string }): Promise<{ reply: string | null; routedTo: string | null; blocked: string | null }> {
+  async handleChannelInbound(tenantId: string, jid: string, from: string, text: string, media?: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string }, opts?: { fromMe?: boolean; isSelf?: boolean }): Promise<{ reply: string | null; routedTo: string | null; blocked: string | null }> {
+    // A message the owner sent from the connected number (and not the "Message Yourself" chat) is only
+    // answered when this agent has "Answer myself" turned on. Otherwise it's just learned for style.
+    if (opts?.fromMe && !opts?.isSelf) {
+      const r = await this.resolver.resolve(this.chatKey(tenantId, jid));
+      const a = r ? this.agents.get(r.agentId) : undefined;
+      if (!a || !a.answerSelf) return { reply: null, routedTo: null, blocked: 'self_not_answered' };
+    }
     const waMessageId = `ch-${++this.seq}`;
     const key = this.chatKey(tenantId, jid); // tenant-scoped so two users can't collide on a contact
     const msg: InboundMessage = { waMessageId, from, phoneNumberId: key, type: 'text', text, currentTurnMedia: media, timestamp: this.now() };
@@ -304,7 +313,7 @@ export class AppState {
   private channelFor(tenantId: string): BaileysChannel {
     let ch = this.channels.get(tenantId);
     if (!ch) {
-      ch = new BaileysChannel(tenantId, async (jid, from, text, media) => (await this.handleChannelInbound(tenantId, jid, from, text, media)).reply);
+      ch = new BaileysChannel(tenantId, async (jid, from, text, media, opts) => (await this.handleChannelInbound(tenantId, jid, from, text, media, opts)).reply);
       this.channels.set(tenantId, ch);
     }
     return ch;
@@ -843,6 +852,16 @@ export class AppState {
     const a = this.getAgent(id, tenantId);
     if (!a) return undefined;
     a.status = status;
+    this.persist();
+    return a;
+  }
+
+  /** Toggle "Answer myself": whether the agent also replies to messages the owner sends from the
+   *  connected WhatsApp number (in this agent's chats). */
+  setAnswerSelf(id: string, tenantId: string, enabled: boolean): StoredAgent | undefined {
+    const a = this.getAgent(id, tenantId);
+    if (!a) return undefined;
+    a.answerSelf = enabled;
     this.persist();
     return a;
   }

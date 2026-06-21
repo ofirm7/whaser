@@ -59,7 +59,7 @@ export class BaileysChannel {
 
   /** Per-tenant channel: `slug` namespaces the auth/chat/style files so each user links their own
    *  WhatsApp. onInbound receives (chatJid, senderId, text) and returns the reply text (or null). */
-  constructor(slug: string, private readonly onInbound: (jid: string, from: string, text: string, media?: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string }) => Promise<string | null>) {
+  constructor(slug: string, private readonly onInbound: (jid: string, from: string, text: string, media?: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string }, opts?: { fromMe?: boolean; isSelf?: boolean }) => Promise<string | null>) {
     const safe = (slug || 'default').replace(/[^a-z0-9_-]/gi, '_');
     this.slug = safe;
     this.authDir = fileURLToPath(new URL('../.wa-auth/' + safe, import.meta.url));
@@ -292,9 +292,11 @@ export class BaileysChannel {
         // (@s.whatsapp.net) is carried in remoteJidAlt. The chat allow-list is bound on the PN /
         // @g.us form, so match + reply on that.
         const jid = [rawJid, altJid].find((j) => j && (j.endsWith('@s.whatsapp.net') || j.endsWith('@g.us')));
-        // "Message Yourself" chat: fromMe but addressed to your own number — the agent SHOULD answer it.
+        // "Message Yourself" chat = fromMe to your own number (always answered). Other fromMe messages
+        // are routed too, but the store only answers them when the agent's "Answer myself" flag is on.
         const isSelf = !!m.key?.fromMe && !!jid && !!this.me && this.numberOf(jid) === this.me;
-        if (m.key?.fromMe && !isSelf) { if (text) this.recordOwnerMessage(text); continue; } // owner messaging others → style only, don't reply
+        const fromMe = !!m.key?.fromMe;
+        if (fromMe && text) this.recordOwnerMessage(text); // always learn the owner's writing style
         if (!jid) continue; // not an individual/group we can route
         // Bump recency so an active chat floats to the top; pushName names a 1:1 contact.
         this.recordChat(jid, jid.endsWith('@g.us') ? undefined : m.pushName, m.messageTimestamp);
@@ -344,7 +346,7 @@ export class BaileysChannel {
         if (!effectiveText && !media) continue; // nothing actionable
         const from = this.numberOf(jid);
         try {
-          const reply = await this.onInbound(jid, from, effectiveText, media);
+          const reply = await this.onInbound(jid, from, effectiveText, media, { fromMe, isSelf });
           if (reply) { const sent = await sock.sendMessage(jid, { text: reply }); const sid = sent?.key?.id; if (sid) this.sentIds.add(sid); }
         } catch (e) {
           console.error('[baileys] inbound error', e);

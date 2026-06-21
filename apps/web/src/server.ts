@@ -219,7 +219,7 @@ app.get('/api/agents/:id', wrap(async (req, res, auth) => {
     res.sendStatus(404);
     return;
   }
-  res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername, listenChats: a.listenChats, triggers: a.triggers ?? [] });
+  res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername, listenChats: a.listenChats, triggers: a.triggers ?? [], answerSelf: a.answerSelf === true });
 }));
 
 app.delete('/api/agents/:id', wrap(async (req, res, auth) => {
@@ -311,6 +311,13 @@ app.post('/api/agents/:id/chats', wrap(async (req, res, auth) => {
     .map((c) => ({ id: String(c.id), name: String(c.name) }));
   const a = state.editChats(req.params.id, auth.tenantId, list);
   res.json({ id: a.id, listenChats: a.listenChats });
+}));
+
+app.post('/api/agents/:id/answer-self', wrap(async (req, res, auth) => {
+  const { enabled } = (req.body ?? {}) as { enabled?: unknown };
+  const a = state.setAnswerSelf(req.params.id, auth.tenantId, enabled === true);
+  if (!a) { res.sendStatus(404); return; }
+  res.json({ id: a.id, answerSelf: a.answerSelf === true });
 }));
 
 // --- Scheduled triggers (auto-firing timed actions) ---
