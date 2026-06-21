@@ -18,7 +18,8 @@ import { WorkflowAgentRuntime } from './workflowRuntime';
 import { BaileysChannel } from './baileys';
 import { TriggerScheduler } from './scheduler';
 import { loadAgents, saveAgents } from './persistence';
-import { readdirSync, readFileSync, existsSync, statSync, mkdirSync, renameSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, existsSync, statSync, mkdirSync, renameSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export type RuntimeModeName = 'claude' | 'stub';
@@ -177,6 +178,7 @@ export class AppState {
   private seq = 0;
 
   constructor() {
+    this.loadBalances();
     const apiKey = process.env.ANTHROPIC_API_KEY;
     const getSpec = (agentId: string): AgentSpec | undefined => this.agents.get(agentId)?.spec;
     let workflowLlm: WorkflowLlm;
@@ -286,10 +288,18 @@ export class AppState {
       const a = r ? this.agents.get(r.agentId) : undefined;
       if (!a || !a.answerSelf) return { reply: null, routedTo: null, blocked: 'self_not_answered' };
     }
+    // Billing gate: out of balance → the agent goes silent until the owner tops up above $1.
+    if (!this.canSpend(tenantId)) {
+      const rb = await this.resolver.resolve(this.chatKey(tenantId, jid));
+      const ab = rb ? this.agents.get(rb.agentId) : undefined;
+      if (rb) this.logActivity({ ts: this.now(), tenantId, agentId: rb.agentId, agentName: ab?.spec.agent_name ?? rb.agentId, channel: 'whatsapp', chatId: jid, from, text, routedTo: null, reply: null, blocked: 'no_balance' });
+      return { reply: null, routedTo: null, blocked: 'no_balance' };
+    }
     const waMessageId = `ch-${++this.seq}`;
     const key = this.chatKey(tenantId, jid); // tenant-scoped so two users can't collide on a contact
     const msg: InboundMessage = { waMessageId, from, phoneNumberId: key, type: 'text', text, currentTurnMedia: media, timestamp: this.now() };
     const out = await this.handler(msg);
+    if (out?.text) this.recordSpend(tenantId, this.runtime.lastUsage);
     const blocked = this.lastBlock.get(waMessageId) ?? null;
     const routedTo = out ? this.runtime.lastRoutedTo : null;
     const route = await this.resolver.resolve(key);
@@ -604,7 +614,9 @@ export class AppState {
     if (this.firing.has(trigger.id)) return; // overlap guard: a fire (scheduled or manual) is already in flight
     this.firing.add(trigger.id);
     try {
+      if (!this.canSpend(agent.tenantId)) throw new Error('no balance — top up above $1 to resume scheduled actions');
       const out = await this.runtime.complete({ agentId, messages: [{ role: 'user', content: trigger.prompt }] });
+      this.recordSpend(agent.tenantId, this.runtime.lastUsage);
       const text = (out.text ?? '').trim();
       const ch = this.channels.get(agent.tenantId);
       const connected = ch?.getStatus().status === 'connected';
@@ -886,9 +898,11 @@ export class AppState {
     const agent = this.getAgent(agentId, tenantId);
     if (!agent) return null;
     if (agent.status !== 'live') return { reply: null, blocked: 'agent_paused', status: agent.status, routedTo: null };
+    if (!this.canSpend(tenantId)) return { reply: null, blocked: 'no_balance', status: agent.status, routedTo: null };
     const waMessageId = `sim-${++this.seq}`;
     const msg: InboundMessage = { waMessageId, from, phoneNumberId: agent.phoneNumberId, type: 'text', text, timestamp: this.now() };
     const out = await this.handler(msg);
+    if (out?.text) this.recordSpend(tenantId, this.runtime.lastUsage);
     agent.lastActivityAt = this.now();
     const blocked = this.lastBlock.get(waMessageId) ?? null;
     const routedTo = out ? this.runtime.lastRoutedTo : null;
@@ -905,7 +919,11 @@ export class AppState {
   async suggestImprovements(agentId: string, tenantId: string, instruction?: string): Promise<TuningResult | null> {
     const agent = this.getAgent(agentId, tenantId);
     if (!agent) return null;
-    return this.tuner.suggest({ spec: agent.spec, transcripts: this.transcripts.get(agentId) ?? [], instruction });
+    if (!this.canSpend(tenantId)) throw new Error('Your balance is empty — add credit (above $1) to use AI features.');
+    const transcripts = this.transcripts.get(agentId) ?? [];
+    const r = await this.tuner.suggest({ spec: agent.spec, transcripts, instruction });
+    this.recordSpendText(tenantId, (instruction ?? '') + JSON.stringify(transcripts), JSON.stringify(r));
+    return r;
   }
 
   applyImprovements(agentId: string, tenantId: string, suggestions: TuningSuggestion[]): StoredAgent {
@@ -926,7 +944,10 @@ export class AppState {
   async proposeExtension(agentId: string, tenantId: string, kind: ExtensionKind, instruction: string, prior?: SpecExtension | null): Promise<SpecExtension | null> {
     const agent = this.getAgent(agentId, tenantId);
     if (!agent) return null;
-    return this.extender.propose({ spec: agent.spec, kind, instruction, prior: prior ?? null });
+    if (!this.canSpend(tenantId)) throw new Error('Your balance is empty — add credit (above $1) to use AI features.');
+    const r = await this.extender.propose({ spec: agent.spec, kind, instruction, prior: prior ?? null });
+    this.recordSpendText(tenantId, instruction, JSON.stringify(r));
+    return r;
   }
 
   /** Wrap free text (e.g. an uploaded file) as a ready-to-apply context extension (no LLM). */
@@ -978,5 +999,78 @@ export class AppState {
 
   tenantUsage(tenantId: string): number {
     return this.breaker.usage(tenantId);
+  }
+
+  // --- Billing: per-tenant USD balance. AI stops at $0 and only resumes above $1. ---
+  private readonly balances = new Map<string, { balance: number; suspended: boolean }>();
+  private readonly balancesFile = fileURLToPath(new URL('../.data/balances.json', import.meta.url));
+  /** Free starting credit for a new workspace (USD). Override with WHASER_START_BALANCE. */
+  private readonly START_BALANCE = Number(process.env.WHASER_START_BALANCE ?? '5') || 5;
+  private readonly RESUME_ABOVE = 1; // must be above $1 to resume after hitting $0
+  // Claude Sonnet pricing (USD per token). Override with WHASER_PRICE_IN/OUT (per 1M tokens).
+  private readonly PRICE_IN = (Number(process.env.WHASER_PRICE_IN ?? '3') || 3) / 1_000_000;
+  private readonly PRICE_OUT = (Number(process.env.WHASER_PRICE_OUT ?? '15') || 15) / 1_000_000;
+
+  private loadBalances(): void {
+    try {
+      if (existsSync(this.balancesFile)) {
+        const d = JSON.parse(readFileSync(this.balancesFile, 'utf8'));
+        if (d && typeof d === 'object') for (const [k, v] of Object.entries(d as Record<string, { balance?: number; suspended?: boolean }>)) {
+          this.balances.set(k, { balance: Number(v?.balance ?? this.START_BALANCE), suspended: v?.suspended === true });
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  private saveBalances(): void {
+    try {
+      const dir = dirname(this.balancesFile); if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      writeFileSync(this.balancesFile, JSON.stringify(Object.fromEntries(this.balances), null, 2));
+    } catch { /* ignore */ }
+  }
+  private acct(tenantId: string): { balance: number; suspended: boolean } {
+    let a = this.balances.get(tenantId);
+    if (!a) { a = { balance: this.START_BALANCE, suspended: this.START_BALANCE <= 0 }; this.balances.set(tenantId, a); this.saveBalances(); }
+    return a;
+  }
+  private costOf(u: { inputTokens: number; outputTokens: number }): number {
+    return (u.inputTokens || 0) * this.PRICE_IN + (u.outputTokens || 0) * this.PRICE_OUT;
+  }
+
+  /** What the GUI shows: current balance + whether AI is currently blocked. */
+  billingState(tenantId: string): { balance: number; blocked: boolean; resumeAbove: number } {
+    const a = this.acct(tenantId);
+    return { balance: Math.round(a.balance * 10000) / 10000, blocked: !this.canSpend(tenantId), resumeAbove: this.RESUME_ABOVE };
+  }
+
+  /** Whether this tenant may make an AI call right now (hysteresis: $0 stops, >$1 resumes). */
+  canSpend(tenantId: string): boolean {
+    const a = this.acct(tenantId);
+    if (a.balance > this.RESUME_ABOVE) { if (a.suspended) { a.suspended = false; this.saveBalances(); } return true; }
+    if (a.suspended) return false;
+    return a.balance > 0;
+  }
+
+  /** Debit the dollar cost of an AI call; suspend the tenant if it drops to $0. */
+  recordSpend(tenantId: string, usage: { inputTokens: number; outputTokens: number }): void {
+    const cost = this.costOf(usage);
+    if (cost <= 0) return;
+    const a = this.acct(tenantId);
+    a.balance = Math.max(0, a.balance - cost);
+    if (a.balance <= 0) a.suspended = true;
+    this.saveBalances();
+  }
+  /** Estimate-debit for AI calls whose token counts we don't capture (wizard/tuner/extender). */
+  recordSpendText(tenantId: string, inText: string, outText: string): void {
+    this.recordSpend(tenantId, { inputTokens: Math.ceil((inText || '').length / 4), outputTokens: Math.ceil((outText || '').length / 4) });
+  }
+
+  /** Add credit (POC top-up stand-in for a payment). Clears suspension once above the resume floor. */
+  topUp(tenantId: string, amount: number): { balance: number; blocked: boolean; resumeAbove: number } {
+    const amt = Math.max(0, Math.min(100, Number(amount) || 0));
+    const a = this.acct(tenantId);
+    a.balance = Math.round((a.balance + amt) * 10000) / 10000;
+    if (a.balance > this.RESUME_ABOVE) a.suspended = false;
+    this.saveBalances();
+    return this.billingState(tenantId);
   }
 }
