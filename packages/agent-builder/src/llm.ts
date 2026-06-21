@@ -34,7 +34,7 @@ export interface LlmClient {
   /** Synthesize a full AgentSpec from the whole interview transcript (structured output). */
   synthesizeFromConversation(args: { messages: InterviewTurn[] }): Promise<unknown>;
   /** One interviewer turn for designing a timed action for an EXISTING agent (spec-aware). */
-  interviewTrigger(args: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }>;
+  interviewTrigger(args: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean; buildNow: boolean }>;
   /** Synthesize a timed-action plan (label, action prompt, cadence, capability requests) from the chat. */
   synthesizeTrigger(args: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<TriggerPlan>;
 }
@@ -144,8 +144,11 @@ const TRIGGER_INTERVIEW_SYSTEM = [
   "the agent's chats. Through a short chat, figure out: WHAT the agent should do each time it fires (a clear",
   'imperative instruction), HOW OFTEN (every N seconds/minutes/hours/days/weeks), and whether it needs NEW',
   'capabilities it does not already have (a tool, a skill, or a workflow). Only propose capabilities the spec',
-  'lacks. Ask ONE short question at a time and bias to ready_to_build within 2–3 turns; if the user says to',
-  'build it, set ready_to_build=true immediately. Reply ONLY by calling the `respond` tool, in the user\'s language.',
+  'lacks. Ask ONE short question at a time and bias to ready_to_build within 2–3 turns. If the user asks to',
+  'build / create / finish the action now (in ANY language/phrasing), set BOTH ready_to_build=true AND',
+  'build_now=true immediately, confirm you are building it, and stop asking — Whaser will design it',
+  'automatically. Keep build_now=false while the user is still describing or refining.',
+  'Reply ONLY by calling the `respond` tool, in the user\'s language.',
 ].join(' ');
 
 const TRIGGER_SYNTH_SYSTEM = [
@@ -290,7 +293,7 @@ export class AnthropicLlmClient implements LlmClient {
     return JSON.parse(text);
   }
 
-  async interviewTrigger({ spec, messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }> {
+  async interviewTrigger({ spec, messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean; buildNow: boolean }> {
     const tool = {
       name: 'respond',
       description: 'Send your next message to the user and report whether you have enough to build the timed action.',
@@ -298,10 +301,11 @@ export class AnthropicLlmClient implements LlmClient {
       input_schema: {
         type: 'object',
         additionalProperties: false,
-        required: ['reply', 'ready_to_build'],
+        required: ['reply', 'ready_to_build', 'build_now'],
         properties: {
           reply: { type: 'string', description: 'Your next message to the user (short, one focused question).' },
           ready_to_build: { type: 'boolean', description: 'True once you know what to do, how often, and any new capabilities needed.' },
+          build_now: { type: 'boolean', description: "True ONLY when the user's latest message explicitly asks to build / create / finish the timed action NOW, in ANY language or phrasing (e.g. 'build it', 'בנה את זה', 'go ahead', 'create it', 'yes do it'). When true, also set ready_to_build=true. False while the user is still describing or refining." },
         },
       },
     };
@@ -317,7 +321,7 @@ export class AnthropicLlmClient implements LlmClient {
     const input = res.content.find((b) => b.type === 'tool_use')?.input;
     const reply = typeof input?.reply === 'string' ? input.reply : '';
     if (!reply) throw new Error('Interviewer returned no message');
-    return { reply, readyToBuild: input?.ready_to_build === true };
+    return { reply, readyToBuild: input?.ready_to_build === true, buildNow: input?.build_now === true };
   }
 
   async synthesizeTrigger({ spec, messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<TriggerPlan> {

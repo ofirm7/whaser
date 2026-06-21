@@ -337,7 +337,10 @@ function openTriggerBuilder(agentId, agent){
     catch(e){ addBub('bot', tf('⚠ {0}', e.message)); } })();
   const send=async()=>{ const text=input.value.trim(); if(!text||sending||!sessionId) return; input.value=''; addBub('me',text); setBusy(true);
     const typing=$(`<div class="bub bot muted">${esc(t('typing…'))}</div>`); chat.appendChild(typing); chat.scrollTop=chat.scrollHeight;
-    try{ const r=await api('/api/agents/'+agentId+'/triggers/message','POST',{ sessionId, text }); typing.remove(); addBub('bot', r.reply); if(r.readyToBuild) showBuild(); }
+    try{ const r=await api('/api/agents/'+agentId+'/triggers/message','POST',{ sessionId, text }); typing.remove(); addBub('bot', r.reply);
+      if(r.readyToBuild||r.buildNow) showBuild();
+      // The user explicitly asked to build (any language) → press "Build this action" for them.
+      if(r.buildNow){ const b=actions.querySelector('button'); if(b && !b.disabled){ setBusy(false); propose(b); return; } } }
     catch(e){ typing.remove(); addBub('bot', tf('⚠ {0}', e.message)); }
     setBusy(false); input.focus(); };
   sendBtn.onclick=send; input.addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });

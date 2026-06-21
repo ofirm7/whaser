@@ -77,7 +77,7 @@ export class AgentBuilder {
   // --- Timed-action (trigger) builder for an existing agent ---
 
   /** One interviewer turn while designing a timed action for an existing agent. */
-  async interviewTrigger(spec: AgentSpec, messages: InterviewTurn[]): Promise<{ reply: string; readyToBuild: boolean }> {
+  async interviewTrigger(spec: AgentSpec, messages: InterviewTurn[]): Promise<{ reply: string; readyToBuild: boolean; buildNow: boolean }> {
     return this.llm.interviewTrigger({ spec, messages });
   }
 
