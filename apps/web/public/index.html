@@ -502,7 +502,6 @@ async function AgentsView(wrap){
       card.innerHTML = `<div class="row" style="justify-content:space-between"><b>${esc(a.name)}</b>
         <span class="badge ${a.status==='live'?'live':'paused'}">${t(a.status)}</span></div>
         <div class="muted" style="margin:6px 0">${esc(a.goal)}</div>
-        <div><span class="pill">${esc(a.tone)}</span><span class="pill">${esc(a.model)}</span><span class="pill">📱 ${esc(a.phoneNumberId)}</span></div>
         <div class="muted" style="margin-top:8px;font-size:12.5px">${tf('Last activity: {0}', a.lastActivityAt? new Date(a.lastActivityAt).toLocaleString(locale()):'—')}</div>`;
       card.onclick = ()=>{ view='agent:'+a.id; render(); };
       grid.appendChild(card);
