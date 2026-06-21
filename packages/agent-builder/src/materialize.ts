@@ -1,7 +1,7 @@
 import type { AgentSpec, AgentTool } from './schema';
 
 /** Derive a JSON-Schema input_schema (closed) from a tool's closed parameter list. */
-function toInputSchema(tool: AgentTool): Record<string, unknown> {
+export function toInputSchema(tool: AgentTool): Record<string, unknown> {
   const properties: Record<string, unknown> = {};
   for (const p of tool.parameters) properties[p.name] = { type: p.type, description: p.description };
   return {
