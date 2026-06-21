@@ -544,7 +544,7 @@ export class AppState {
     return { sessionId: id, greeting: TRIGGER_BUILDER_GREETING };
   }
 
-  async triggerBuilderMessage(sessionId: string, owner: string, text: string): Promise<{ reply: string; readyToBuild: boolean } | null> {
+  async triggerBuilderMessage(sessionId: string, owner: string, text: string): Promise<{ reply: string; readyToBuild: boolean; buildNow: boolean } | null> {
     const s = this.triggerSessions.get(sessionId);
     if (!s || s.ownerUsername !== owner) return null;
     const agent = this.getAgent(s.agentId, s.tenantId);

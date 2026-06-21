@@ -22,8 +22,8 @@ class MockLlm implements LlmClient {
   async synthesizeFromConversation(): Promise<unknown> {
     return this.specToReturn;
   }
-  async interviewTrigger({ messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }> {
-    return { reply: `trigger ${messages.length}`, readyToBuild: messages.length >= 2 };
+  async interviewTrigger({ messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean; buildNow: boolean }> {
+    return { reply: `trigger ${messages.length}`, readyToBuild: messages.length >= 2, buildNow: false };
   }
   async synthesizeTrigger(): Promise<TriggerPlan> {
     return { label: 'Daily ping', prompt: 'Send a daily ping.', value: 1, unit: 'day', capabilityRequests: [] };

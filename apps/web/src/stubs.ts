@@ -136,17 +136,18 @@ export class StubLlmClient implements LlmClient {
 
   // --- Timed-action (trigger) builder stubs (deterministic; no Anthropic key) ---
 
-  async interviewTrigger({ messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean }> {
+  async interviewTrigger({ messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<{ reply: string; readyToBuild: boolean; buildNow: boolean }> {
     const userTurns = messages.filter((m) => m.role === 'user').length;
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
     const demoNote = ' (Demo — connect an Anthropic key for a real action designer.)';
-    if (/\b(build it|that'?s all|go ahead|create it|let'?s build|i'?m done|do it)\b/i.test(lastUser)) {
-      return { reply: 'Got it — enough to set up this timed action. Click "Build this action" to review it.' + demoNote, readyToBuild: true };
+    // Explicit "build it" intent (English + Hebrew) → design the action immediately.
+    if (/\b(build it|build the action|that'?s all|go ahead|create it|let'?s build|i'?m done|do it)\b/i.test(lastUser) || /בנה|תבנה|צור|תצור|סיים/.test(lastUser)) {
+      return { reply: 'On it — designing this timed action now.' + demoNote, readyToBuild: true, buildNow: true };
     }
     if (userTurns <= 1) {
-      return { reply: 'What should the agent do each time it fires, and how often (e.g. "every 1 hour", "every 2 days")?' + demoNote, readyToBuild: false };
+      return { reply: 'What should the agent do each time it fires, and how often (e.g. "every 1 hour", "every 2 days")?' + demoNote, readyToBuild: false, buildNow: false };
     }
-    return { reply: 'Great — that\'s enough. Click "Build this action" to review it, or add more detail.' + demoNote, readyToBuild: true };
+    return { reply: 'Great — that\'s enough. Click "Build this action" to review it, or add more detail.' + demoNote, readyToBuild: true, buildNow: false };
   }
 
   async synthesizeTrigger({ messages }: { spec: AgentSpec; messages: InterviewTurn[] }): Promise<TriggerPlan> {
