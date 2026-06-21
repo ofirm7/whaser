@@ -416,7 +416,7 @@ function Header(){
     <button class="badge" id="balance" title="${t('Your AI balance. Agents pause at $0 and work again once you top up above $1.')}" style="cursor:pointer;${billing.blocked?'background:var(--danger);color:#2a0a0e;border-color:var(--danger);font-weight:700':''}">💰 $${(billing.balance||0).toFixed(2)}${billing.blocked?' ⚠':''}</button>
     ${langSelect()}
     <span class="badge ${mode==='claude'?'live':'paused'}" title="${mode==='claude'?t('Live Claude (ANTHROPIC_API_KEY set)'):t('Demo mode — set ANTHROPIC_API_KEY for real Claude')}">${mode==='claude'?t('● Claude'):t('● Demo')}</span>
-    <span class="who">${esc(user.displayName)} · ${esc(user.tenantName)} · ${esc(user.role)}</span>
+    <span class="who">${esc(user.displayName)}</span>
     <button class="ghost" id="logout">${t('Log out')}</button>`;
   h.querySelectorAll('[data-go]').forEach(b=> b.onclick=()=>{ view=b.dataset.go; render(); });
   const menubtn=h.querySelector('#menubtn'), panel=h.querySelector('#menupanel');
