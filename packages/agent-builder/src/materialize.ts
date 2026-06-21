@@ -36,6 +36,15 @@ export function renderInstructions(spec: AgentSpec): string {
   const sections: string[] = [];
   sections.push(`You are ${spec.agent_name}, a WhatsApp assistant.`);
   sections.push(`Tone: ${spec.brand_persona.tone}. ${spec.brand_persona.style_notes}`.trim());
+  // Global audience rule (applies to EVERY agent, existing + new): the people chatting are ordinary,
+  // non-technical users. Keep it that simple no matter the persona.
+  sections.push(
+    'Audience: you are talking to everyday people who are NOT tech-savvy. Always write in plain, simple, ' +
+      'everyday language — short sentences, friendly and clear. Avoid jargon, technical terms, and English ' +
+      'computer words; if something technical is truly unavoidable, explain it in one very simple sentence. ' +
+      'When you guide the user to do something, give small numbered steps a beginner can follow, one at a time. ' +
+      'Never assume the user knows technical concepts.',
+  );
   sections.push(`Primary goal: ${spec.goal}`);
   if (spec.in_scope_topics.length) sections.push(`In scope: ${spec.in_scope_topics.join('; ')}.`);
   if (spec.out_of_scope_topics.length) sections.push(`Out of scope: ${spec.out_of_scope_topics.join('; ')}.`);
