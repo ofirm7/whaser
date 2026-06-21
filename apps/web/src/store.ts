@@ -13,6 +13,7 @@ import type { RuntimeMessage } from '../../../packages/whatsapp-gateway/src/agen
 import type { WorkflowLlm } from '../../../packages/agent-builder/src/index';
 import { StubLlmClient, StubWorkflowLlm, StubTuner, StubExtender } from './stubs';
 import { makeAnthropicLike, AnthropicWorkflowLlm } from './anthropic';
+import { scanYad2New, formatListings, isYad2Context } from './yad2';
 import { WorkflowAgentRuntime } from './workflowRuntime';
 import { BaileysChannel } from './baileys';
 import { TriggerScheduler } from './scheduler';
@@ -501,8 +502,22 @@ export class AppState {
           this.persist();
           return `Saved: ${JSON.stringify(input)}. I'll use these settings from now on.`;
         }
-        // READ / SEARCH / SCAN / LOOKUP -> steer to the server-side web_search tool (added alongside).
+        // READ / SEARCH / SCAN / LOOKUP.
         if (has(/\b(search|scan|lookup|look up|browse|fetch|find|query|check|get|read|crawl)\b/) && tool?.side_effecting !== true) {
+          // Yad2 real-estate agent -> hardened scraper with per-agent dedup (only NEW listings).
+          if (isYad2Context(`${name} ${tool?.description ?? ''} ${agent.spec.goal}`)) {
+            const params = {
+              city: typeof input.city === 'string' ? input.city : undefined,
+              maxPrice: Number(input.max_price ?? input.maxPrice ?? input.price) || undefined,
+              minPrice: Number(input.min_price) || undefined,
+              propertyType: typeof input.property_type === 'string' ? input.property_type : (typeof input.type === 'string' ? input.type : undefined),
+              rooms: Number(input.rooms) || undefined,
+            };
+            const r = await scanYad2New(agentId, params);
+            if (r.blocked) return `Yad2 blocks automated scraping from this server (Radware anti-bot)${r.source !== 'direct' ? ` even via ${r.source}` : ', and no scraping-API key is set'}. To get LIVE Yad2 data, add ZENROWS_API_KEY or SCRAPER_API_KEY to apps/web/.env. For now use the web_search tool to search yad2.co.il for ${JSON.stringify(params)} and summarize matching apartments.`;
+            if (!r.listings.length) return `Scanned Yad2 (${r.totalMatched} matched ${JSON.stringify(params)}) — no NEW listings since the last scan.`;
+            return `Found ${r.listings.length} NEW Yad2 listing(s) matching ${JSON.stringify(params)}:\n\n${formatListings(r.listings)}`;
+          }
           return `Use the web_search tool now to find this on the web (inputs: ${JSON.stringify(input)}), then summarize the relevant results for the user.`;
         }
         // Anything else -> honest best-effort (never "I have no capability").
