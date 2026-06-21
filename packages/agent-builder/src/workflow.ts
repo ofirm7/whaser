@@ -1,4 +1,4 @@
-import type { AgentSpec, SubAgent } from './schema';
+import type { AgentSpec, SubAgent, AgentTool } from './schema';
 import { renderInstructions } from './materialize';
 
 export interface WorkflowRuntimeMessage {
@@ -22,10 +22,13 @@ export interface WorkflowReply {
   usage: { inputTokens: number; outputTokens: number };
 }
 
+/** Executes one of the agent's declared tools and returns a text result for the model. */
+export type ToolExecutor = (name: string, input: Record<string, unknown>) => Promise<string>;
+
 /** The Workflow–Agent–Tool engine's LLM seam: classify intent + produce a reply. Mockable. */
 export interface WorkflowLlm {
   classifyIntent(args: { message: string; routes: Array<{ intent: string; description: string }> }): Promise<string | null>;
-  reply(args: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; media?: WorkflowMedia }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }>;
+  reply(args: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; media?: WorkflowMedia; tools?: AgentTool[]; executeToolCall?: ToolExecutor }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }>;
 }
 
 /** Root identity + (when routed) the selected sub-agent's specialty and allowed tools. */
@@ -48,7 +51,7 @@ export function handoffMessage(spec: AgentSpec): string {
 export class WorkflowEngine {
   constructor(private readonly spec: AgentSpec, private readonly llm: WorkflowLlm) {}
 
-  async handle(messages: WorkflowRuntimeMessage[], media?: WorkflowMedia): Promise<WorkflowReply> {
+  async handle(messages: WorkflowRuntimeMessage[], media?: WorkflowMedia, executeToolCall?: ToolExecutor): Promise<WorkflowReply> {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
     let subAgent: SubAgent | null = null;
     let routedTo = 'default';
@@ -69,7 +72,14 @@ export class WorkflowEngine {
       }
     }
 
-    const r = await this.llm.reply({ systemPrompt: composeSystemPrompt(this.spec, subAgent), messages, media });
+    // Give the model its declared tools (filtered to the routed sub-agent's allow-list) so it can
+    // actually act, not just describe. The executor runs each call against a real platform backend.
+    const tools = executeToolCall
+      ? subAgent && subAgent.tool_names.length
+        ? this.spec.tools.filter((t) => subAgent.tool_names.includes(t.name))
+        : this.spec.tools
+      : undefined;
+    const r = await this.llm.reply({ systemPrompt: composeSystemPrompt(this.spec, subAgent), messages, media, tools, executeToolCall });
     return { text: r.text, routedTo, usage: r.usage };
   }
 }

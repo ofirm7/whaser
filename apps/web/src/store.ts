@@ -192,7 +192,7 @@ export class AppState {
     }
     // Steer each reply into the agent owner's personal writing style — per-tenant samples, resolved
     // per-call inside the runtime for the agent being replied to (race-free across tenants).
-    this.runtime = new WorkflowAgentRuntime(getSpec, workflowLlm, (agentId) => this.ownerStylePreambleForAgent(agentId));
+    this.runtime = new WorkflowAgentRuntime(getSpec, workflowLlm, (agentId) => this.ownerStylePreambleForAgent(agentId), (agentId) => this.buildExecutor(agentId));
     this.handler = createAgentReplyHandler({
       resolver: this.resolver,
       runtime: this.runtime,
@@ -441,6 +441,96 @@ export class AppState {
     return trigger;
   }
 
+  /** Parse a cadence ({value, unit}) from a tool's input or its description ("every 5 minutes"). */
+  private parseCadence(input: Record<string, unknown>, desc?: string): { value: number; unit: TimeUnit } {
+    if (input.interval_minutes != null || input.minutes != null) {
+      const n = Number(input.interval_minutes ?? input.minutes);
+      if (Number.isFinite(n) && n > 0) return { value: Math.round(n), unit: 'minute' };
+    }
+    const v = Number(input.value ?? input.interval);
+    if (Number.isFinite(v) && v > 0) return { value: Math.round(v), unit: this.normalizeUnit(input.unit) };
+    const m = `${desc ?? ''}`.toLowerCase().match(/every\s+(\d+)\s*(seconds?|minutes?|min|hours?|days?|weeks?)/);
+    if (m) {
+      const u = m[2].startsWith('min') || m[2].startsWith('minute') ? 'minute' : m[2].replace(/s$/, '');
+      return { value: Number(m[1]), unit: this.normalizeUnit(u) };
+    }
+    return { value: 15, unit: 'minute' };
+  }
+
+  /** Per-agent tool executor: maps each declared tool to a REAL platform backend so the agent
+   *  actually performs its capabilities (web search, scheduling, WhatsApp notify, params) rather
+   *  than saying it lacks them. Injected into the reply runtime's tool-use loop. */
+  private buildExecutor(agentId: string): ((name: string, input: Record<string, unknown>) => Promise<string>) | undefined {
+    const agent = this.agents.get(agentId);
+    if (!agent) return undefined;
+    const tenantId = agent.tenantId;
+    return async (name, input) => {
+      const tool = agent.spec.tools.find((t) => t.name === name);
+      const k = `${name} ${tool?.description ?? ''}`.toLowerCase();
+      const has = (re: RegExp) => re.test(k);
+      try {
+        // SCHEDULE / RECURRING -> create a real (disabled) scheduled trigger.
+        if (has(/\b(schedule|recurring|recur|periodic|timed|every|interval|cron)\b/)) {
+          if (this.firing.size > 0) return 'A scheduled run is already in progress; not re-scheduling.';
+          const { value, unit } = this.parseCadence(input, tool?.description);
+          const trg = this.addTrigger(agentId, tenantId, {
+            label: name,
+            prompt: `Run "${name}" for: ${agent.spec.goal}. Then message the bound chats with anything new.`,
+            value, unit, enabled: false, toolName: name,
+          });
+          return `Created a recurring action "${name}" every ${value} ${unit} (id ${trg.id}). It starts OFF — the owner enables it with the Active toggle on the agent page.`;
+        }
+        // SEND / NOTIFY -> a real WhatsApp message to the agent's bound chats.
+        if (has(/\b(send|notify|message|alert|whatsapp|remind|dm)\b/)) {
+          const ch = this.channels.get(tenantId);
+          const text = String(input.text ?? input.message ?? input.body ?? input.content ?? JSON.stringify(input));
+          const chats = agent.listenChats ?? [];
+          if (!ch) return 'WhatsApp is not linked for this account, so I could not send the message.';
+          if (!chats.length) return 'No chats are selected for this agent, so there is nowhere to send to.';
+          let n = 0;
+          for (const c of chats.slice(0, 5)) if (await ch.sendText(c.id, text)) n++;
+          return n ? `Sent the WhatsApp message to ${n} chat(s).` : 'Could not send the WhatsApp message (send failed).';
+        }
+        // UPDATE / SAVE params -> persist as agent knowledge so it's remembered next turn.
+        if (has(/\b(update|set|save|store|change|configure|param|parameter)\b/)) {
+          const label = `state:${name}`;
+          agent.spec.knowledge_sources = [
+            ...(agent.spec.knowledge_sources ?? []).filter((s) => s.label !== label),
+            { type: 'text', label, content: JSON.stringify(input) },
+          ];
+          this.persist();
+          return `Saved: ${JSON.stringify(input)}. I'll use these settings from now on.`;
+        }
+        // READ / SEARCH / SCAN / LOOKUP -> steer to the server-side web_search tool (added alongside).
+        if (has(/\b(search|scan|lookup|look up|browse|fetch|find|query|check|get|read|crawl)\b/) && tool?.side_effecting !== true) {
+          return `Use the web_search tool now to find this on the web (inputs: ${JSON.stringify(input)}), then summarize the relevant results for the user.`;
+        }
+        // Anything else -> honest best-effort (never "I have no capability").
+        return `The "${name}" capability isn't wired to a live backend in this demo yet; proceeding best-effort with: ${JSON.stringify(input)}.`;
+      } catch (e) {
+        return `The "${name}" action failed: ${e instanceof Error ? e.message : String(e)}.`;
+      }
+    };
+  }
+
+  /** On publish/deploy: auto-create a (disabled) scheduled trigger for any tool implying a recurring
+   *  action, so a "do X every N minutes" agent is genuinely recurring once the owner enables it. */
+  private provisionToolsFor(agent: StoredAgent): void {
+    for (const tool of agent.spec.tools) {
+      const k = `${tool.name} ${tool.description}`.toLowerCase();
+      if (!/\b(schedule|recurring|recur|periodic|timed|every|interval|cron)\b/.test(k)) continue;
+      if ((agent.triggers ?? []).some((t) => t.toolName === tool.name)) continue; // idempotent
+      const { value, unit } = this.parseCadence({}, tool.description);
+      try {
+        this.addTrigger(agent.id, agent.tenantId, {
+          label: tool.name,
+          prompt: `Run "${tool.name}" for: ${agent.spec.goal}. Then message the bound chats with anything new.`,
+          value, unit, enabled: false, toolName: tool.name,
+        });
+      } catch { /* ignore */ }
+    }
+  }
+
   /** Patch a trigger (partial). Re-validates value/unit; keeps label/prompt non-empty when provided. */
   updateTrigger(agentId: string, tenantId: string, trgId: string, patch: { label?: unknown; prompt?: unknown; value?: unknown; unit?: unknown; enabled?: unknown }): AgentTrigger {
     const agent = this.getAgent(agentId, tenantId);
@@ -670,6 +760,7 @@ export class AppState {
     };
     this.agents.set(agent.id, agent);
     this.resolver.bind(agent.phoneNumberId, { agentId: agent.id, tenantId: agent.tenantId });
+    this.provisionToolsFor(agent); // auto-create disabled triggers for recurring capabilities
     this.persist();
     return agent;
   }
@@ -728,6 +819,7 @@ export class AppState {
     };
     this.agents.set(agent.id, agent);
     this.resolver.bind(agent.phoneNumberId, { agentId: agent.id, tenantId });
+    this.provisionToolsFor(agent); // auto-create disabled triggers for recurring capabilities
     this.persist();
     return agent;
   }

@@ -1,9 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { AnthropicLike, AnthropicCreateParams, AnthropicMessage } from '../../../packages/agent-builder/src/index';
+import type { AnthropicLike, AnthropicCreateParams, AnthropicMessage, AgentTool, ToolExecutor } from '../../../packages/agent-builder/src/index';
+import { toInputSchema } from '../../../packages/agent-builder/src/index';
 import type { WorkflowLlm, WorkflowRuntimeMessage, WorkflowMedia } from '../../../packages/agent-builder/src/index';
 
 interface RawMessage {
-  content: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }>;
+  // `id` is kept so tool_use blocks can be echoed back + matched to their tool_result.
+  content: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown>; id?: string }>;
   stop_reason?: string;
   usage?: { input_tokens?: number; output_tokens?: number };
 }
@@ -63,11 +65,11 @@ export class AnthropicWorkflowLlm implements WorkflowLlm {
     return typeof intent === 'string' && intent !== 'none' && intents.includes(intent) ? intent : null;
   }
 
-  async reply({ systemPrompt, messages, media }: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; media?: WorkflowMedia }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }> {
+  async reply({ systemPrompt, messages, media, tools, executeToolCall }: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; media?: WorkflowMedia; tools?: AgentTool[]; executeToolCall?: ToolExecutor }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }> {
     // Attach the current-turn media (if any) to the LAST user message: image -> image block (vision),
     // document(PDF) -> document block. Audio/video never reach here (the API has no such block).
     const lastUserIdx = media ? messages.map((m) => m.role).lastIndexOf('user') : -1;
-    const apiMessages = messages.map((m, i): { role: string; content: unknown } => {
+    const convo: Array<{ role: string; content: unknown }> = messages.map((m, i) => {
       if (i === lastUserIdx && media) {
         const block =
           media.kind === 'document'
@@ -77,13 +79,47 @@ export class AnthropicWorkflowLlm implements WorkflowLlm {
       }
       return { role: m.role, content: m.content };
     });
-    const res = (await this.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: apiMessages,
-    })) as RawMessage;
-    const text = res.stop_reason === 'refusal' ? "I'm sorry, I can't help with that." : res.content.find((b) => b.type === 'text')?.text ?? '';
-    return { text, usage: { inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0 } };
+
+    // Give the agent its declared tools as REAL callable tools + Anthropic's server-side web search,
+    // so it actually performs its capabilities instead of saying it lacks them.
+    const useTools = !!(tools && tools.length && executeToolCall);
+    const apiTools = useTools
+      ? [
+          ...tools!.map((t) => ({ name: t.name, description: t.description, input_schema: toInputSchema(t) })),
+          { type: 'web_search_20250305', name: 'web_search', max_uses: 4 },
+        ]
+      : undefined;
+
+    let inTok = 0, outTok = 0;
+    for (let i = 0; i < 6; i++) {
+      const res = (await this.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: convo,
+        ...(apiTools ? { tools: apiTools } : {}),
+      })) as RawMessage;
+      inTok += res.usage?.input_tokens ?? 0;
+      outTok += res.usage?.output_tokens ?? 0;
+      if (res.stop_reason === 'refusal') return { text: "I'm sorry, I can't help with that.", usage: { inputTokens: inTok, outputTokens: outTok } };
+
+      const calls = res.content.filter((b) => b.type === 'tool_use' && b.id && b.name); // our custom tools (web search is server-side)
+      if (res.stop_reason === 'tool_use' && calls.length && executeToolCall) {
+        convo.push({ role: 'assistant', content: res.content }); // MUST echo the tool_use blocks back
+        const results: unknown[] = [];
+        for (const c of calls) {
+          let out: string;
+          try { out = await executeToolCall(c.name as string, (c.input ?? {}) as Record<string, unknown>); }
+          catch (e) { out = `Error running ${c.name}: ${e instanceof Error ? e.message : String(e)}`; }
+          results.push({ type: 'tool_result', tool_use_id: c.id, content: out });
+        }
+        convo.push({ role: 'user', content: results });
+        continue;
+      }
+      if (res.stop_reason === 'pause_turn') { convo.push({ role: 'assistant', content: res.content }); continue; } // resume server tool
+      const text = res.content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('').trim();
+      return { text, usage: { inputTokens: inTok, outputTokens: outTok } };
+    }
+    return { text: '', usage: { inputTokens: inTok, outputTokens: outTok } }; // tool-loop cap reached
   }
 }
