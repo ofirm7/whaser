@@ -56,7 +56,7 @@
   .chatname { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-size:14.5px; font-weight:500; }
   .chatbadge { text-align:center; font-size:13px; color:var(--muted); }
   .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; padding:18px; z-index:1000; }
-  .modal { width:400px; max-width:100%; margin:0; }
+  .modal { width:400px; max-width:100%; max-height:calc(100vh - 36px); overflow-y:auto; margin:0; }
   .modal.wide { width:560px; }
 </style>
 </head>
