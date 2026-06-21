@@ -1,4 +1,4 @@
-import makeWASocket, { useMultiFileAuthState, DisconnectReason, downloadMediaMessage } from '@whiskeysockets/baileys';
+import makeWASocket, { useMultiFileAuthState, DisconnectReason, downloadMediaMessage, getBinaryNodeChild } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -168,14 +168,24 @@ export class BaileysChannel {
     }
     if (!this.sock || this.status !== 'connected') return hit ? hit.url || null : null;
     try {
-      // 5s timeout: a non-responding picture IQ otherwise hangs ~60s (Baileys default), and the
-      // picker fires ~100 of these — without a cap they saturate the socket + the browser pool.
-      const url = await this.sock.profilePictureUrl(jid, 'preview', 5000);
-      const ok = typeof url === 'string' && !!url;
-      this.photoCache.set(jid, { url: ok ? url : '', at: Date.now() }); // cache success AND miss/timeout
-      return ok ? url : null;
+      let url: string | undefined;
+      if (jid.endsWith('@g.us')) {
+        url = (await this.sock.profilePictureUrl(jid, 'preview', 8000)) ?? undefined; // groups resolve normally
+      } else {
+        // For 1:1 contacts, profilePictureUrl attaches a privacy "tcToken" that this linked
+        // (companion) session never gets a response for — it hangs until timeout. The raw
+        // w:profile:picture IQ WITHOUT that token (the same path groups use) returns instantly.
+        const r = await this.sock.query(
+          { tag: 'iq', attrs: { target: jid, to: '@s.whatsapp.net', type: 'get', xmlns: 'w:profile:picture' }, content: [{ tag: 'picture', attrs: { type: 'preview', query: 'url' } }] },
+          8000,
+        );
+        url = getBinaryNodeChild(r, 'picture')?.attrs?.url ?? undefined;
+      }
+      const got = typeof url === 'string' && url ? url : '';
+      this.photoCache.set(jid, { url: got, at: Date.now() }); // cache success AND miss/timeout
+      return got || null;
     } catch {
-      // Thrown error IQ (404 item-not-found / 401 / 403) = no available photo → negative-cache.
+      // No available photo (privacy / none) → the IQ throws item-not-found/401/403 → negative-cache.
       this.photoCache.set(jid, { url: '', at: Date.now() });
       return null;
     }
