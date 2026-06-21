@@ -193,6 +193,7 @@ const I18N = { he: {
     "⚠ {0}": "⚠ {0}",
     "⚠️ <b>POC only.</b> This links your <i>personal</i> WhatsApp via the unofficial WhatsApp-Web protocol — against WhatsApp's ToS, with a real risk of the number being banned. Prefer a spare SIM. The Cloud API path is the production-safe option.": "⚠️ <b>הדגמה בלבד.</b> זה מקשר את ה-WhatsApp <i>האישי</i> שלכם דרך פרוטוקול WhatsApp-Web הלא-רשמי — בניגוד לתנאי השימוש של WhatsApp, עם סיכון ממשי לחסימת המספר. עדיף להשתמש ב-SIM חלופי. נתיב ה-Cloud API הוא האפשרות הבטוחה לסביבת ייצור.",
     "✏️ Edit chats": "✏️ עריכת צ׳אטים",
+    "Wrong username or password — please try again.": "שם משתמש או סיסמה שגויים — נסו שוב.",
     "🙋 Answer my own messages: On": "🙋 לענות גם להודעות שלי: פעיל",
     "🙋 Answer my own messages: Off": "🙋 לענות גם להודעות שלי: כבוי",
     "When on, the agent also replies to messages YOU send from your connected WhatsApp.": "כשמופעל, הסוכן עונה גם להודעות שאתם שולחים מה-WhatsApp המחובר.",
@@ -269,7 +270,9 @@ applyDir();
 
 async function api(path, method='GET', body){
   const r = await fetch(path, { method, headers:{ 'content-type':'application/json', ...(token?{authorization:'Bearer '+token}:{}) }, body: body?JSON.stringify(body):undefined });
-  if (r.status === 401){ logout(); throw new Error(t('Session expired — please log in.')); }
+  // A 401 on the auth endpoints means "wrong credentials" — let the login form show it inline,
+  // don't treat it as an expired session (which would wipe the form via logout()+render()).
+  if (r.status === 401 && !/^\/api\/(login|register)\b/.test(path)){ logout(); throw new Error(t('Session expired — please log in.')); }
   if (!r.ok){ let e; try{ e=await r.json(); }catch{ e={error:r.statusText}; } throw new Error(e.error || ('HTTP '+r.status)); }
   return r.status === 204 ? null : r.json();
 }
@@ -418,7 +421,7 @@ function LoginView(){
       const d = await api(signup?'/api/register':'/api/login','POST',body);
       token=d.token; user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp;
       localStorage.setItem('whaser_token',token); localStorage.setItem('whaser_user',JSON.stringify(user)); view='agents'; render();
-    }catch(err){ const el=card.querySelector('#e'); if(el) el.textContent = err.message; } };
+    }catch(err){ const el=card.querySelector('#e'); if(el) el.textContent = (!signup && /credential|401|unauthor/i.test(err.message)) ? t('Wrong username or password — please try again.') : err.message; } };
   function paint(){ const signup=amode==='signup';
     card.innerHTML = `<div class="langbar">${langSelect()}</div>
       <h1>Whaser</h1><div class="muted" style="margin-bottom:10px">${t('AI-driven WhatsApp agent builder')}</div>
