@@ -111,6 +111,18 @@ export interface StoredAgent {
   lastActivityAt: number | null;
 }
 
+/** A scheduled trigger a catalog entry ships with — seeded (disabled) on deploy so a curated agent
+ *  is recurring out of the box once the owner flips it Active. Cadence is clamped like any trigger. */
+export interface CatalogTrigger {
+  label: string;
+  /** The instruction run through the agent each time it fires. */
+  prompt: string;
+  value: number;
+  unit: TimeUnit;
+  /** Default false (owner enables it). Honoured as-is when present. */
+  enabled?: boolean;
+}
+
 /** A curated, ready-to-deploy agent in the global catalog (loaded from apps/web/catalog/*.json). */
 export interface CatalogEntry {
   id: string;
@@ -119,6 +131,8 @@ export interface CatalogEntry {
   category: string;
   icon?: string;
   spec: AgentSpec;
+  /** Optional scheduled triggers seeded onto the deployed agent (disabled unless enabled:true). */
+  triggers?: CatalogTrigger[];
 }
 
 export interface WizardSession {
@@ -168,6 +182,8 @@ export class AppState {
   private readonly runtime: WorkflowAgentRuntime;
   private readonly tuner: Tuner;
   private readonly extender: Extender;
+  /** The tool-capable LLM (Claude mode only) used by the improve chat to test + change agents directly. */
+  private readonly improveLlm: AnthropicWorkflowLlm | null;
   private readonly handler: InboundHandler;
   private readonly scheduler: TriggerScheduler;
   /** Trigger ids currently firing — shared overlap guard for the scheduler AND manual "Run now". */
@@ -186,13 +202,16 @@ export class AppState {
     if (apiKey) {
       this.mode = 'claude';
       this.builder = new AgentBuilder(new AnthropicLlmClient({ client: makeAnthropicLike(apiKey) }));
-      workflowLlm = new AnthropicWorkflowLlm(apiKey);
+      const wf = new AnthropicWorkflowLlm(apiKey);
+      workflowLlm = wf;
+      this.improveLlm = wf;
       this.tuner = new AnthropicTuner({ client: makeAnthropicLike(apiKey) });
       this.extender = new AnthropicExtender({ client: makeAnthropicLike(apiKey) });
     } else {
       this.mode = 'stub';
       this.builder = new AgentBuilder(new StubLlmClient());
       workflowLlm = new StubWorkflowLlm();
+      this.improveLlm = null;
       this.tuner = new StubTuner();
       this.extender = new StubExtender();
     }
@@ -866,6 +885,15 @@ export class AppState {
     this.agents.set(agent.id, agent);
     this.resolver.bind(agent.phoneNumberId, { agentId: agent.id, tenantId });
     this.provisionToolsFor(agent); // auto-create disabled triggers for recurring capabilities
+    // Seed any catalog-shipped scheduled triggers (e.g. an hourly "post the latest updates" digest).
+    // Disabled by default so deploying never starts billing/fan-out until the owner flips it Active.
+    for (const t of entry.triggers ?? []) {
+      try {
+        this.addTrigger(agent.id, tenantId, {
+          label: t.label, prompt: t.prompt, value: t.value, unit: t.unit, enabled: t.enabled === true,
+        });
+      } catch { /* a malformed seed trigger never blocks the deploy */ }
+    }
     this.persist();
     return agent;
   }
@@ -964,22 +992,57 @@ export class AppState {
     return { sessionId: id, agentName: agent.spec.agent_name, greeting: `Your agent "${agent.spec.agent_name}" is paused while we improve it. What would you like to change or add? (For example: info it should know, a new skill, or a new task it can handle.)` };
   }
 
-  /** One improvement-chat turn: the AI replies and, when a change is agreed, returns a proposal to approve. */
-  async improveMessage(sessionId: string, owner: string, text: string): Promise<{ reply: string; proposal: SpecExtension | null } | null> {
+  /** One improvement-chat turn. With a key, the AI can TEST the agent and CHANGE it directly (tools);
+   *  otherwise (stub) it falls back to a conversational propose-to-approve. */
+  async improveMessage(sessionId: string, owner: string, text: string): Promise<{ reply: string; proposal: SpecExtension | null; applied: boolean; version: number } | null> {
     const s = this.improveSessions.get(sessionId);
     if (!s || s.owner !== owner) return null;
     const agent = this.getAgent(s.agentId, s.tenantId);
     if (!agent) return null;
     if (!this.canSpend(s.tenantId)) throw new Error('Your balance is empty — add credit (above $1) to keep improving.');
     s.messages.push({ role: 'user', content: text });
+    const versionBefore = agent.spec.version;
+
+    if (this.improveLlm) {
+      // The improve AI has live access to the agent: it can TEST it and CHANGE it directly via tools.
+      const exec = async (name: string, input: Record<string, unknown>): Promise<string> => {
+        if (name === 'test_agent') {
+          const out = await this.runtime.complete({ agentId: s.agentId, messages: [{ role: 'user', content: String(input.message ?? '') }], noTools: true });
+          this.recordSpend(s.tenantId, this.runtime.lastUsage, s.agentId, agent.spec.agent_name);
+          return `The agent replied:\n"${(out.text || '(no reply)').slice(0, 1500)}"`;
+        }
+        if (name === 'apply_improvement') {
+          const kind = String(input.kind);
+          if (!['context', 'skill', 'workflow'].includes(kind)) return 'Unknown change kind.';
+          const ext = await this.extender.propose({ spec: agent.spec, kind: kind as ExtensionKind, instruction: String(input.instruction ?? ''), prior: null });
+          this.applyExtension(s.agentId, s.tenantId, ext); // validates + consistency-checks + version-bumps
+          return `Applied ✓ — the agent is now v${agent.spec.version}. Change: ${ext.summary}`;
+        }
+        return 'Unknown tool.';
+      };
+      const sys = [
+        'You are helping the OWNER improve their existing WhatsApp AI agent, and you have FULL access to it.',
+        'You can TEST it (call test_agent with a realistic user message to see exactly how it replies now, and',
+        'again after a change to verify it worked) and CHANGE it directly (call apply_improvement — kind:',
+        'context = info it should know, skill = a reusable how-to, workflow = a new task area — with a clear',
+        'instruction; the agent is paused so editing is safe). Good flow: understand the goal, test current',
+        'behavior if useful, agree on a change, apply it, then test again and report the before/after in plain,',
+        "simple language. Only apply changes the owner agreed to. Be concise and non-technical. Reply in the owner's language.",
+      ].join(' ') + `\n\nCurrent agent configuration (AgentSpec):\n${JSON.stringify(agent.spec)}`;
+      const r = await this.improveLlm.improveChat({ systemPrompt: sys, messages: s.messages, executeToolCall: exec });
+      s.messages.push({ role: 'assistant', content: r.text });
+      this.recordSpend(s.tenantId, r.usage, s.agentId, agent.spec.agent_name);
+      return { reply: r.text, proposal: null, applied: agent.spec.version !== versionBefore, version: agent.spec.version };
+    }
+
+    // Stub (no key): conversational propose-to-approve, no live test/apply.
     const r = await this.extender.improveInterview({ spec: agent.spec, messages: s.messages });
     s.messages.push({ role: 'assistant', content: r.reply });
     let proposal: SpecExtension | null = null;
     if (r.proposeKind !== 'none' && r.proposeInstruction.trim()) {
       try { proposal = await this.extender.propose({ spec: agent.spec, kind: r.proposeKind, instruction: r.proposeInstruction, prior: null }); } catch { proposal = null; }
     }
-    this.recordSpendText(s.tenantId, text + JSON.stringify(agent.spec).slice(0, 2000), r.reply + JSON.stringify(proposal ?? ''), s.agentId, agent.spec.agent_name);
-    return { reply: r.reply, proposal };
+    return { reply: r.reply, proposal, applied: false, version: agent.spec.version };
   }
 
   /** Finish the improvement chat: RESUME the agent (restore its pre-improve status) and close the session. */

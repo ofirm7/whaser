@@ -730,7 +730,9 @@ async function AgentDetailView(wrap, id){
       catch(e){ addBub('bot', tf('⚠ {0}', e.message)); } })();
     const send=async()=>{ const text=input.value.trim(); if(!text||sending||!sessionId) return; input.value=''; addBub('me',text); sending=true; input.disabled=true; sendBtn.disabled=true;
       const typing=$(`<div class="bub bot muted">${esc(t('typing…'))}</div>`); chat.appendChild(typing); chat.scrollTop=chat.scrollHeight;
-      try{ const r=await api('/api/agents/'+id+'/improve/message','POST',{ sessionId, text }); typing.remove(); addBub('bot', r.reply); if(r.proposal) showProposal(r.proposal); }
+      try{ const r=await api('/api/agents/'+id+'/improve/message','POST',{ sessionId, text }); typing.remove(); addBub('bot', r.reply);
+        if(r.applied){ const n=$(`<div class="bub bot ok" style="font-size:13px">${tf('✓ Agent updated to v{0}', r.version)}</div>`); chat.appendChild(n); chat.scrollTop=chat.scrollHeight; }
+        if(r.proposal) showProposal(r.proposal); }
       catch(e){ typing.remove(); addBub('bot', tf('⚠ {0}', e.message)); }
       sending=false; input.disabled=false; sendBtn.disabled=false; input.focus(); };
     sendBtn.onclick=send; input.addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });

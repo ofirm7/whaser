@@ -122,4 +122,38 @@ export class AnthropicWorkflowLlm implements WorkflowLlm {
     }
     return { text: '', usage: { inputTokens: inTok, outputTokens: outTok } }; // tool-loop cap reached
   }
+
+  /** The "improve this agent" chat: a tool-using loop where the AI can TEST the agent (run it and see
+   *  its reply) and CHANGE it (apply a context/skill/workflow improvement) directly. The executor wires
+   *  test_agent + apply_improvement to the live agent. */
+  async improveChat({ systemPrompt, messages, executeToolCall }: { systemPrompt: string; messages: WorkflowRuntimeMessage[]; executeToolCall: (name: string, input: Record<string, unknown>) => Promise<string> }): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number } }> {
+    const apiTools = [
+      { name: 'test_agent', description: 'Send a test message to THIS agent (the one being improved) and get back exactly how it replies. Use it to investigate current behavior, and again after a change to verify it worked.', input_schema: { type: 'object', additionalProperties: false, required: ['message'], properties: { message: { type: 'string', description: 'A realistic message a real user would send the agent.' } } } },
+      { name: 'apply_improvement', description: 'Apply a concrete improvement to THIS agent right now (it is paused, so it is safe to edit). Use only after the owner has agreed to the change.', input_schema: { type: 'object', additionalProperties: false, required: ['kind', 'instruction'], properties: { kind: { type: 'string', enum: ['context', 'skill', 'workflow'], description: 'context = add info it should know; skill = a reusable how-to; workflow = a new task area / sub-agent.' }, instruction: { type: 'string', description: 'A clear, complete description of exactly the change to make.' } } } },
+    ];
+    const convo: Array<{ role: string; content: unknown }> = messages.map((m) => ({ role: m.role, content: m.content }));
+    let inTok = 0, outTok = 0;
+    for (let i = 0; i < 8; i++) {
+      const res = (await this.create({ model: 'claude-sonnet-4-6', max_tokens: 1024, system: systemPrompt, tools: apiTools, messages: convo })) as RawMessage;
+      inTok += res.usage?.input_tokens ?? 0;
+      outTok += res.usage?.output_tokens ?? 0;
+      if (res.stop_reason === 'refusal') return { text: "I'm sorry, I can't help with that.", usage: { inputTokens: inTok, outputTokens: outTok } };
+      const calls = res.content.filter((b) => b.type === 'tool_use' && b.id && b.name);
+      if (res.stop_reason === 'tool_use' && calls.length) {
+        convo.push({ role: 'assistant', content: res.content });
+        const results: unknown[] = [];
+        for (const c of calls) {
+          let out: string;
+          try { out = await executeToolCall(c.name as string, (c.input ?? {}) as Record<string, unknown>); }
+          catch (e) { out = `Error: ${e instanceof Error ? e.message : String(e)}`; }
+          results.push({ type: 'tool_result', tool_use_id: c.id, content: out });
+        }
+        convo.push({ role: 'user', content: results });
+        continue;
+      }
+      const text = res.content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('').trim();
+      return { text, usage: { inputTokens: inTok, outputTokens: outTok } };
+    }
+    return { text: '', usage: { inputTokens: inTok, outputTokens: outTok } };
+  }
 }
