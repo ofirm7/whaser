@@ -29,6 +29,22 @@ function validateFile(dir: string, file: string): string[] {
     const issues = checkConsistency(entry.spec as Parameters<typeof checkConsistency>[0]);
     for (const i of issues) errors.push(`inconsistent: ${i.message}`);
   }
+  // Optional catalog-shipped scheduled triggers (seeded onto the agent on deploy).
+  if (entry.triggers !== undefined) {
+    if (!Array.isArray(entry.triggers)) {
+      errors.push('"triggers" must be an array');
+    } else {
+      const UNITS = ['second', 'minute', 'hour', 'day', 'week'];
+      entry.triggers.forEach((t, i) => {
+        const tg = t as Record<string, unknown>;
+        if (typeof tg.label !== 'string' || !tg.label.trim()) errors.push(`trigger[${i}]: missing/empty "label"`);
+        if (typeof tg.prompt !== 'string' || !tg.prompt.trim()) errors.push(`trigger[${i}]: missing/empty "prompt"`);
+        if (typeof tg.value !== 'number' || !Number.isFinite(tg.value) || tg.value <= 0) errors.push(`trigger[${i}]: "value" must be a positive number`);
+        if (typeof tg.unit !== 'string' || !UNITS.includes(tg.unit)) errors.push(`trigger[${i}]: "unit" must be one of ${UNITS.join(', ')}`);
+        if (tg.enabled !== undefined && typeof tg.enabled !== 'boolean') errors.push(`trigger[${i}]: "enabled" must be a boolean`);
+      });
+    }
+  }
   return errors;
 }
 
