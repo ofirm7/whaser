@@ -90,6 +90,7 @@ let view = 'agents';
 // --- i18n: English (US) + Hebrew (RTL). The English source string is the lookup key; I18N[lang]
 // holds the overrides. A missing key falls back to the English source, so the UI never breaks. ---
 const I18N = { he: {
+    "✓ Tuned to write in your personal style.": "✓ כוונן לכתוב בסגנון האישי שלכם.",
     "\"{0}\" will be permanently removed, along with its number binding and any chats it listens on. This can't be undone.": "\"{0}\" יימחק לצמיתות, יחד עם שיוך המספר שלו וכל הצ׳אטים שהוא מאזין להם. לא ניתן לבטל פעולה זו.",
     "(Claude Agent Skill)": "(מיומנות סוכן של Claude)",
     "(no messages yet — say hi)": "(אין עדיין הודעות — תגידו שלום)",
@@ -992,6 +993,7 @@ async function CreateView(wrap){
           try{ await api('/api/wizard/select-chats','POST',{ sessionId, chats });
             const pub=await api('/api/wizard/publish','POST',{ sessionId });
             box.appendChild($(`<div class="ok" style="margin-top:10px">${tf('Published as {0} on {1}. Opening…', esc(pub.agentId), esc(pub.phoneNumberId))}</div>`));
+            if (pub.ownerStyled) box.appendChild($(`<div class="muted" style="margin-top:4px">${t('✓ Tuned to write in your personal style.')}</div>`));
             setTimeout(()=>{ view='agent:'+pub.agentId; render(); }, 700);
           }catch(e){ alert(e.message); saveBtn.disabled=false; } });
       } else {

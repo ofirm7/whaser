@@ -122,6 +122,21 @@ export class BaileysChannel {
     return this.ownerStyle.slice(-limit);
   }
 
+  /** A larger, cross-chat corpus of the owner's OWN messages — for a DEEPER style analysis than the
+   *  rolling style samples. Aggregates every fromMe turn across all chats plus the style buffer,
+   *  oldest→newest, deduped. Used when the owner explicitly asks to make an agent write like them. */
+  ownerCorpus(limit = 80): string[] {
+    const owned: { text: string; ts: number }[] = [];
+    for (const arr of this.threadHistory.values()) for (const m of arr) if (m.fromMe) owned.push({ text: m.text, ts: m.ts });
+    owned.sort((a, b) => a.ts - b.ts);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const add = (s: string) => { const t = (s ?? '').trim(); if (!t) return; const k = t.toLowerCase(); if (seen.has(k)) return; seen.add(k); out.push(t); };
+    for (const m of owned) add(m.text);
+    for (const s of this.ownerStyle) add(s); // fold in passively-collected samples (chats with no synced history yet)
+    return out.slice(-limit);
+  }
+
   private saveChats(): void {
     if (this.saveTimer) return;
     this.saveTimer = setTimeout(() => {

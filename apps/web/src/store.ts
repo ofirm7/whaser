@@ -1,5 +1,5 @@
 import { AgentBuilder, AnthropicLlmClient, AnthropicTuner, AnthropicExtender, applySuggestions, applyExtension, validateAgentSpec, checkConsistency } from '../../../packages/agent-builder/src/index';
-import type { AgentSpec, SlotValues, Tuner, TranscriptTurn, TuningSuggestion, TuningResult, Extender, ExtensionKind, SpecExtension, InterviewTurn } from '../../../packages/agent-builder/src/index';
+import type { AgentSpec, SlotValues, Tuner, TranscriptTurn, TuningSuggestion, TuningResult, Extender, ExtensionKind, SpecExtension, InterviewTurn, AnthropicLike } from '../../../packages/agent-builder/src/index';
 import { InMemoryAgentResolver } from '../../../packages/whatsapp-gateway/src/agentResolver';
 import { InMemoryConversationStore, conversationKey } from '../../../packages/whatsapp-gateway/src/conversationStore';
 import { CircuitBreaker } from '../../../packages/whatsapp-gateway/src/circuitBreaker';
@@ -166,6 +166,60 @@ const TRIGGER_BUILDER_GREETING =
   "Let's set up an action this agent runs automatically on a schedule. Tell me what it should do and how " +
   "often (e.g. \"every morning\", \"every 2 hours\"). I'll build any tools or skills it needs, then create the trigger.";
 
+/** A compact, faithful description of how the owner writes — used to tune an agent to match them. */
+export interface StyleProfile {
+  tone: string;
+  /** Freeform: sentence length, slang, spelling quirks, punctuation, emoji habits, etc. */
+  style_notes: string;
+  /** BCP-47 tag the owner writes in, e.g. 'en' or 'he'. */
+  language: string;
+}
+
+/** Distil a style profile from messages WITHOUT an LLM (stub/demo mode). Best-effort. */
+export function analyzeStyleHeuristic(input: string[]): StyleProfile {
+  const samples = (input ?? []).filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+  if (!samples.length) return { tone: 'casual, conversational', style_notes: 'Mirror their everyday writing.', language: 'en' };
+  const all = samples.join(' ');
+  const avgLen = Math.round(samples.reduce((n, s) => n + s.length, 0) / samples.length);
+  const emoji = /\p{Extended_Pictographic}/u.test(all);
+  const hebrew = /[֐-׿]/.test(all);
+  const exclaim = (all.match(/!/g) || []).length > samples.length * 0.3;
+  const lower = all === all.toLowerCase() && /[a-z]/.test(all);
+  const notes = [
+    avgLen < 30 ? 'Writes short, punchy messages.' : avgLen > 120 ? 'Writes longer, detailed messages.' : 'Writes medium-length messages.',
+    emoji ? 'Uses emojis.' : 'Rarely uses emojis.',
+    exclaim ? 'Expressive — leans on exclamation marks.' : 'Calm, even punctuation.',
+    lower ? 'Tends to write in lowercase.' : '',
+    'Mirror their exact wording, spelling, slang, and casing from how they actually write.',
+  ].filter(Boolean).join(' ');
+  return { tone: avgLen < 30 ? 'casual, brief' : 'casual, conversational', style_notes: notes, language: hebrew ? 'he' : 'en' };
+}
+
+// Style phrases the owner uses to refer to their own voice (en/he); reused for match + negation checks.
+const EN_STYLE_PHRASE = '(like me|like myself|in my (own )?(style|voice|tone|way)|my (own )?(style|voice|tone|writing|wording|phrasing))';
+const HE_STYLE_PHRASE = '(כמוני|כמו ש?אני|הסגנון שלי|הקול שלי|הכתיבה שלי|בסגנון שלי)';
+
+/**
+ * Multilingual (en/he) detector for an actual REQUEST to "make it talk like me" in a design/improve
+ * conversation. Per clause, requires a directive verb + a self-style phrase, and rejects the clause
+ * when a negation precedes the phrase ("don't make it sound like me") — so passing mentions ("my tone
+ * is usually formal") and negations don't trigger an unwanted style change.
+ */
+export function conversationAsksOwnerStyle(messages: Array<{ role: string; content: string }>): boolean {
+  const clauses = messages.filter((m) => m.role === 'user').map((m) => m.content).join('\n').toLowerCase().split(/[.!?\n,;]+|—/);
+  const enVerb = /\b(make|write|talk|speak|sound|reply|respond|answer|chat|text|mimic|copy|imitate|rewrite|rephrase|match|use|tune|adapt|adjust|phrase|word)\b/;
+  const enPhrase = new RegExp(`\\b${EN_STYLE_PHRASE}\\b`);
+  const enNegBefore = new RegExp(`\\b(don.?t|dont|do not|not|never|stop|avoid|no longer)\\b[^.?!]*?\\b${EN_STYLE_PHRASE}\\b`);
+  const heVerb = /(תכתוב|תדבר|לדבר|לכתוב|שיכתוב|שידבר|שיענה|תענה|תחקה|חקה|כתוב|דבר|תשתמש|שישתמש|להשתמש)/;
+  const hePhrase = new RegExp(HE_STYLE_PHRASE);
+  const heNegBefore = new RegExp(`(לא |אל |בלי |אין )[^.?!]*?${HE_STYLE_PHRASE}`);
+  for (const c of clauses) {
+    if (enVerb.test(c) && enPhrase.test(c) && !enNegBefore.test(c)) return true;
+    if (heVerb.test(c) && hePhrase.test(c) && !heNegBefore.test(c)) return true;
+  }
+  return false;
+}
+
 export class AppState {
   /** 'claude' when ANTHROPIC_API_KEY is set, else 'stub'. */
   readonly mode: RuntimeModeName;
@@ -184,6 +238,8 @@ export class AppState {
   private readonly extender: Extender;
   /** The tool-capable LLM (Claude mode only) used by the improve chat to test + change agents directly. */
   private readonly improveLlm: AnthropicWorkflowLlm | null;
+  /** Structured-output client (Claude mode only) used to distil the owner's writing style on request. */
+  private anthropic: AnthropicLike | null = null;
   private readonly handler: InboundHandler;
   private readonly scheduler: TriggerScheduler;
   /** Trigger ids currently firing — shared overlap guard for the scheduler AND manual "Run now". */
@@ -205,6 +261,7 @@ export class AppState {
       const wf = new AnthropicWorkflowLlm(apiKey);
       workflowLlm = wf;
       this.improveLlm = wf;
+      this.anthropic = makeAnthropicLike(apiKey);
       this.tuner = new AnthropicTuner({ client: makeAnthropicLike(apiKey) });
       this.extender = new AnthropicExtender({ client: makeAnthropicLike(apiKey) });
     } else {
@@ -435,6 +492,74 @@ export class AppState {
       "sound like a generic assistant. Keep the agent's goal and scope, but the VOICE must be the owner's.\n" +
       'Examples of how the owner writes:\n' + list
     );
+  }
+
+  // --- "Copy my style" (on request, behind the scenes in the create / improve chats) ---
+
+  /** Claude-backed analysis of the owner's writing into a style profile (stub mode → heuristic). */
+  private async analyzeOwnerStyle(tenantId: string, samples: string[]): Promise<StyleProfile> {
+    if (!this.anthropic) return analyzeStyleHeuristic(samples);
+    const schema = {
+      type: 'object', additionalProperties: false,
+      required: ['tone', 'style_notes', 'language'],
+      properties: { tone: { type: 'string' }, style_notes: { type: 'string' }, language: { type: 'string' } },
+    };
+    const sys =
+      'You analyze how ONE person writes in chat and produce a compact, faithful style profile so an agent ' +
+      'can reply EXACTLY like them. Capture tone, typical sentence length, slang/abbreviations, spelling ' +
+      'quirks, punctuation, capitalization, emoji habits, and the language they write in. Be specific and ' +
+      'concrete; do NOT sanitize, formalize, or "improve" their voice.';
+    const res = await this.anthropic.messages.create({
+      model: 'claude-sonnet-4-6', max_tokens: 1024, thinking: { type: 'adaptive' },
+      output_config: { format: { type: 'json_schema', schema } },
+      system: sys,
+      messages: [{ role: 'user', content: `The person's own messages (most recent last):\n${samples.map((s) => `- ${s}`).join('\n')}\n\nProduce their style profile. "language" is a BCP-47 tag (e.g. en, he).` }],
+    });
+    if (res.stop_reason === 'refusal') return analyzeStyleHeuristic(samples);
+    const text = res.content.find((b) => b.type === 'text')?.text;
+    if (!text) return analyzeStyleHeuristic(samples);
+    this.recordSpendText(tenantId, samples.join('\n'), text, '__owner_style__', 'Owner style analysis');
+    let p: Partial<StyleProfile>;
+    try { p = JSON.parse(text) as Partial<StyleProfile>; } catch { return analyzeStyleHeuristic(samples); }
+    // If the model returned an empty profile, fall back to the heuristic so we never tune to nothing.
+    if (!(p.tone || '').trim() && !(p.style_notes || '').trim()) return analyzeStyleHeuristic(samples);
+    return { tone: (p.tone || '').trim() || 'casual', style_notes: (p.style_notes || '').trim(), language: (p.language || 'en').trim() || 'en' };
+  }
+
+  /** "Copy my style", on request: read MORE of the owner's WhatsApp writing, analyze it, and pin a
+   *  closer match into THIS agent (the owner's live voice is already applied automatically; this
+   *  deepens it). Returns a plain-language result for the create/improve chats to relay. */
+  async applyOwnerStyleToAgent(agentId: string, tenantId: string): Promise<{ applied: boolean; reason?: string; summary?: string }> {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) return { applied: false, reason: 'agent not found' };
+    const samples = this.channels.get(tenantId)?.ownerCorpus(80) ?? [];
+    if (samples.length < 3) {
+      return { applied: false, reason: 'I need a little more of your own WhatsApp writing first — link your WhatsApp and send a few messages so I can learn how you write, then ask again.' };
+    }
+    if (!this.canSpend(tenantId)) throw new Error('Your balance is empty — add credit (above $1) to use AI features.');
+    const profile = await this.analyzeOwnerStyle(tenantId, samples);
+    const tone = (profile.tone || '').trim() || agent.spec.brand_persona.tone;
+    const notes = (profile.style_notes || '').trim() || agent.spec.brand_persona.style_notes;
+    const next: AgentSpec = {
+      ...agent.spec,
+      version: agent.spec.version + 1,
+      brand_persona: { tone, style_notes: notes },
+      default_language: profile.language || agent.spec.default_language,
+    };
+    const schema = validateAgentSpec(next);
+    if (!schema.valid) throw new Error(`spec invalid: ${schema.errors.join('; ')}`);
+    const issues = checkConsistency(next);
+    if (issues.length) throw new Error(`spec inconsistent: ${issues.map((i) => i.message).join('; ')}`);
+    agent.spec = next;
+    this.persist();
+    return { applied: true, summary: `Tuned to write like you — ${tone}${notes ? `. ${notes}` : ''}` };
+  }
+
+  /** If a design/improve conversation asked for the owner's own style, apply it. Best-effort —
+   *  never throws into the caller's happy path; returns whether it was applied. */
+  async applyOwnerStyleIfRequested(agentId: string, tenantId: string, messages: Array<{ role: string; content: string }>): Promise<boolean> {
+    if (!conversationAsksOwnerStyle(messages)) return false;
+    try { return (await this.applyOwnerStyleToAgent(agentId, tenantId)).applied; } catch { return false; }
   }
 
   /** Set an agent's chat allow-list and bind each chat jid (tenant-scoped) to it. */
@@ -1051,6 +1176,11 @@ export class AppState {
           this.applyExtension(s.agentId, s.tenantId, ext); // validates + consistency-checks + version-bumps
           return `Applied ✓ — the agent is now v${agent.spec.version}. Change: ${ext.summary}`;
         }
+        if (name === 'copy_my_style') {
+          // Behind the scenes: study the owner's OWN WhatsApp writing and tune the agent to match it.
+          const r = await this.applyOwnerStyleToAgent(s.agentId, s.tenantId);
+          return r.applied ? `Applied ✓ — ${r.summary} The agent now writes more like you (it's v${agent.spec.version}).` : `Couldn't do that yet: ${r.reason}`;
+        }
         return 'Unknown tool.';
       };
       const sys = [
@@ -1059,6 +1189,8 @@ export class AppState {
         'users experience it: its real tools run, only outgoing WhatsApp sends are simulated) and CHANGE it',
         'directly (call apply_improvement — kind: context = info it should know, skill = a reusable how-to,',
         'workflow = a new task area — with a clear instruction; the agent is paused so editing is safe).',
+        'If the owner asks to make the agent talk/sound/write like THEM (copy their own style or voice), call',
+        "copy_my_style — it studies the owner's own WhatsApp writing and tunes the agent to match them; no input needed.",
         'MANDATORY verification loop, no exceptions: (1) reproduce the problem with test_agent first so you see',
         "the actual current behavior; (2) apply a change; (3) test_agent AGAIN with the same message(s) to check",
         'it is really fixed. NEVER tell the owner it is fixed unless your most recent test_agent result actually',
