@@ -141,7 +141,7 @@ app.get('/api/me', (req: Request, res: Response) => {
 
 // --- Billing (per-tenant USD balance; AI stops at $0, resumes above $1) ---
 app.get('/api/billing', wrap(async (_req, res, auth) => {
-  res.json(state.billingState(auth.tenantId));
+  res.json({ ...state.billingState(auth.tenantId), usage: state.usageBreakdown(auth.tenantId) });
 }));
 app.post('/api/billing/topup', wrap(async (req, res, auth) => {
   const { amount } = (req.body ?? {}) as { amount?: unknown };

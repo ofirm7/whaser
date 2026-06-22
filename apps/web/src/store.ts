@@ -179,6 +179,7 @@ export class AppState {
 
   constructor() {
     this.loadBalances();
+    this.loadUsage();
     const apiKey = process.env.ANTHROPIC_API_KEY;
     const getSpec = (agentId: string): AgentSpec | undefined => this.agents.get(agentId)?.spec;
     let workflowLlm: WorkflowLlm;
@@ -299,7 +300,6 @@ export class AppState {
     const key = this.chatKey(tenantId, jid); // tenant-scoped so two users can't collide on a contact
     const msg: InboundMessage = { waMessageId, from, phoneNumberId: key, type: 'text', text, currentTurnMedia: media, timestamp: this.now() };
     const out = await this.handler(msg);
-    if (out?.text) this.recordSpend(tenantId, this.runtime.lastUsage);
     const blocked = this.lastBlock.get(waMessageId) ?? null;
     const routedTo = out ? this.runtime.lastRoutedTo : null;
     const route = await this.resolver.resolve(key);
@@ -310,6 +310,7 @@ export class AppState {
       this.transcripts.set(route.agentId, t.slice(-40));
       const a = this.agents.get(route.agentId);
       if (a) a.lastActivityAt = this.now();
+      if (out?.text) this.recordSpend(tenantId, this.runtime.lastUsage, route.agentId, a?.spec.agent_name ?? route.agentId);
       this.logActivity({ ts: this.now(), tenantId: route.tenantId, agentId: route.agentId, agentName: a?.spec.agent_name ?? route.agentId, channel: 'whatsapp', chatId: jid, from, text, routedTo, reply: out?.text ?? null, blocked });
     }
     return { reply: out?.text ?? null, routedTo, blocked };
@@ -616,7 +617,7 @@ export class AppState {
     try {
       if (!this.canSpend(agent.tenantId)) throw new Error('no balance — top up above $1 to resume scheduled actions');
       const out = await this.runtime.complete({ agentId, messages: [{ role: 'user', content: trigger.prompt }] });
-      this.recordSpend(agent.tenantId, this.runtime.lastUsage);
+      this.recordSpend(agent.tenantId, this.runtime.lastUsage, agentId, agent.spec.agent_name);
       const text = (out.text ?? '').trim();
       const ch = this.channels.get(agent.tenantId);
       const connected = ch?.getStatus().status === 'connected';
@@ -902,7 +903,7 @@ export class AppState {
     const waMessageId = `sim-${++this.seq}`;
     const msg: InboundMessage = { waMessageId, from, phoneNumberId: agent.phoneNumberId, type: 'text', text, timestamp: this.now() };
     const out = await this.handler(msg);
-    if (out?.text) this.recordSpend(tenantId, this.runtime.lastUsage);
+    if (out?.text) this.recordSpend(tenantId, this.runtime.lastUsage, agentId, agent.spec.agent_name);
     agent.lastActivityAt = this.now();
     const blocked = this.lastBlock.get(waMessageId) ?? null;
     const routedTo = out ? this.runtime.lastRoutedTo : null;
@@ -922,7 +923,7 @@ export class AppState {
     if (!this.canSpend(tenantId)) throw new Error('Your balance is empty — add credit (above $1) to use AI features.');
     const transcripts = this.transcripts.get(agentId) ?? [];
     const r = await this.tuner.suggest({ spec: agent.spec, transcripts, instruction });
-    this.recordSpendText(tenantId, (instruction ?? '') + JSON.stringify(transcripts), JSON.stringify(r));
+    this.recordSpendText(tenantId, (instruction ?? '') + JSON.stringify(transcripts), JSON.stringify(r), agentId, agent.spec.agent_name);
     return r;
   }
 
@@ -946,7 +947,7 @@ export class AppState {
     if (!agent) return null;
     if (!this.canSpend(tenantId)) throw new Error('Your balance is empty — add credit (above $1) to use AI features.');
     const r = await this.extender.propose({ spec: agent.spec, kind, instruction, prior: prior ?? null });
-    this.recordSpendText(tenantId, instruction, JSON.stringify(r));
+    this.recordSpendText(tenantId, instruction, JSON.stringify(r), agentId, agent.spec.agent_name);
     return r;
   }
 
@@ -1050,18 +1051,40 @@ export class AppState {
     return a.balance > 0;
   }
 
-  /** Debit the dollar cost of an AI call; suspend the tenant if it drops to $0. */
-  recordSpend(tenantId: string, usage: { inputTokens: number; outputTokens: number }): void {
+  // Per-agent usage ledger so "what's eating my tokens?" is answerable (persisted across restarts).
+  private readonly usage = new Map<string, { tenantId: string; agentId: string; name: string; calls: number; inTok: number; outTok: number; dollars: number }>();
+  private readonly usageFile = fileURLToPath(new URL('../.data/usage.json', import.meta.url));
+  private loadUsage(): void {
+    try { if (existsSync(this.usageFile)) { const a = JSON.parse(readFileSync(this.usageFile, 'utf8')); if (Array.isArray(a)) for (const u of a) if (u?.agentId) this.usage.set(`${u.tenantId}::${u.agentId}`, { tenantId: u.tenantId, agentId: u.agentId, name: u.name ?? u.agentId, calls: u.calls || 0, inTok: u.inTok || 0, outTok: u.outTok || 0, dollars: u.dollars || 0 }); } } catch { /* ignore */ }
+  }
+  private saveUsage(): void {
+    try { const dir = dirname(this.usageFile); if (!existsSync(dir)) mkdirSync(dir, { recursive: true }); writeFileSync(this.usageFile, JSON.stringify([...this.usage.values()], null, 2)); } catch { /* ignore */ }
+  }
+
+  /** Debit the dollar cost of an AI call; record it against the agent; suspend tenant at $0. */
+  recordSpend(tenantId: string, usage: { inputTokens: number; outputTokens: number }, agentId = '__design__', name = 'Agent builder (design chat)'): void {
     const cost = this.costOf(usage);
     if (cost <= 0) return;
     const a = this.acct(tenantId);
     a.balance = Math.max(0, a.balance - cost);
     if (a.balance <= 0) a.suspended = true;
     this.saveBalances();
+    const key = `${tenantId}::${agentId}`;
+    const u = this.usage.get(key) ?? { tenantId, agentId, name, calls: 0, inTok: 0, outTok: 0, dollars: 0 };
+    u.name = name; u.calls += 1; u.inTok += usage.inputTokens || 0; u.outTok += usage.outputTokens || 0; u.dollars += cost;
+    this.usage.set(key, u);
+    this.saveUsage();
   }
   /** Estimate-debit for AI calls whose token counts we don't capture (wizard/tuner/extender). */
-  recordSpendText(tenantId: string, inText: string, outText: string): void {
-    this.recordSpend(tenantId, { inputTokens: Math.ceil((inText || '').length / 4), outputTokens: Math.ceil((outText || '').length / 4) });
+  recordSpendText(tenantId: string, inText: string, outText: string, agentId?: string, name?: string): void {
+    this.recordSpend(tenantId, { inputTokens: Math.ceil((inText || '').length / 4), outputTokens: Math.ceil((outText || '').length / 4) }, agentId, name);
+  }
+
+  /** Token/cost usage for a tenant, biggest spender first — answers "what's eating my tokens?". */
+  usageBreakdown(tenantId: string): Array<{ agentId: string; name: string; calls: number; tokens: number; dollars: number }> {
+    return [...this.usage.values()].filter((u) => u.tenantId === tenantId)
+      .map((u) => ({ agentId: u.agentId, name: u.name, calls: u.calls, tokens: u.inTok + u.outTok, dollars: Math.round(u.dollars * 10000) / 10000 }))
+      .sort((a, b) => b.dollars - a.dollars);
   }
 
   /** Add credit (POC top-up stand-in for a payment). Clears suspension once above the resume floor. */
