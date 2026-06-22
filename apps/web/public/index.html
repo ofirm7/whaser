@@ -19,6 +19,10 @@
   .menu-item { display:block; width:100%; text-align:start; background:transparent; border:none; color:var(--text); padding:10px 12px; border-radius:8px; cursor:pointer; font:inherit; }
   .menu-item:hover { background:var(--panel2); }
   .menu-item.active { background:var(--panel2); color:var(--accent2); font-weight:600; }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin:14px 0; flex-wrap:wrap; }
+  .tab { background:transparent; border:none; border-bottom:2px solid transparent; color:var(--muted); padding:10px 18px; border-radius:8px 8px 0 0; cursor:pointer; font:inherit; font-size:15px; }
+  .tab:hover { color:var(--text); background:var(--panel2); }
+  .tab.active { color:var(--accent2); border-bottom-color:var(--accent2); font-weight:600; }
   header .spacer { flex:1; }
   header .who { color:var(--muted); font-size:13px; }
   button { font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--panel2); color:var(--text); padding:8px 14px; border-radius:8px; }
@@ -76,6 +80,7 @@ let user = JSON.parse(localStorage.getItem('whaser_user') || 'null');
 let mode = 'stub';
 let whatsapp = { configured:false, phoneNumberId:null, boundAgentId:null };
 let billing = { balance:0, blocked:false, resumeAbove:1 };
+let agentTab = 'simulator'; // active tab on the agent detail page (Schedule / Simulator / Improve)
 let waPollTimer = null;
 let view = 'agents';
 
@@ -594,6 +599,16 @@ async function AgentDetailView(wrap, id){
     catch(e){ alert(e.message); cw.disabled=false; } };
   wrap.appendChild(head);
 
+  // --- Section tabs: show one of Schedule / Simulator / Improve at a time (not one long page) ---
+  const _panes = { schedule: $('<div class="tabpane"></div>'), simulator: $('<div class="tabpane"></div>'), improve: $('<div class="tabpane"></div>') };
+  const _tabbar = $('<div class="tabs"></div>');
+  _tabbar.innerHTML = [['schedule', t('Schedule')], ['simulator', t('Simulator')], ['improve', t('Improve')]].map(([k, l]) => `<button class="tab" data-tab="${k}">${esc(l)}</button>`).join('');
+  const showTab = (k) => { agentTab = k; for (const key in _panes) _panes[key].style.display = key === k ? 'block' : 'none'; _tabbar.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === k)); };
+  _tabbar.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  wrap.appendChild(_tabbar);
+  wrap.appendChild(_panes.schedule); wrap.appendChild(_panes.simulator); wrap.appendChild(_panes.improve);
+  showTab(_panes[agentTab] ? agentTab : 'simulator');
+
   // ⏰ Scheduled triggers — actions the agent runs automatically on a cadence (fires + sends to its chats).
   {
     const chatCount = (a.listenChats||[]).length;
@@ -655,7 +670,7 @@ async function AgentDetailView(wrap, id){
       list.appendChild(row);
     }
     tcard.querySelector('#addtrigger').onclick=()=> openTriggerBuilder(id, a);
-    wrap.appendChild(tcard);
+    _panes.schedule.appendChild(tcard);
   }
 
   // WhatsApp simulator
@@ -663,7 +678,7 @@ async function AgentDetailView(wrap, id){
   sim.innerHTML = `<h2>${t('WhatsApp simulator')}</h2><div class="muted" style="margin-bottom:8px">${t('Sends a real inbound message through the gateway → resolver → cost/abuse breaker → agent runtime → reply. (LLM + WhatsApp transport are stubbed locally.)')}</div>
     <div class="chat" id="chat"></div>
     <div class="composer"><input id="msg" placeholder="${t('Message this agent…')}"/><button class="primary" id="send">${t('Send')}</button></div>`;
-  wrap.appendChild(sim);
+  _panes.simulator.appendChild(sim);
   const chat = sim.querySelector('#chat');
   const from = '+15550000001';
   const addBub = (who, text)=>{ const b=$(`<div class="bub ${who}"></div>`); b.textContent=text; chat.appendChild(b); chat.scrollTop=chat.scrollHeight; };
@@ -684,7 +699,7 @@ async function AgentDetailView(wrap, id){
   const imp = $('<div class="card"></div>');
   imp.innerHTML = `<h2>${t('Improve this agent')}</h2><div class="muted" style="margin-bottom:8px">${t('Open a chat to talk through and apply improvements. The agent is paused while you work, and goes live again when you finish.')}</div>
     <button class="primary" id="improve">${t('✨ Improve in a chat')}</button>`;
-  wrap.appendChild(imp);
+  _panes.improve.appendChild(imp);
   imp.querySelector('#improve').onclick = ()=> improveChat();
 
   function improveChat(){
@@ -777,7 +792,7 @@ async function AgentDetailView(wrap, id){
       <textarea id="wfdesc" rows="2" placeholder="${t('Describe a new task area / sub-agent…')}"></textarea>
       <button id="wfdraft" style="margin-top:6px">${t('Draft workflow')}</button></div>
     <div id="extout" style="margin-top:10px"></div>`;
-  wrap.appendChild(ext);
+  _panes.improve.appendChild(ext);
   const out = ext.querySelector('#extout');
   const proposeFor = (kind)=> (instruction, prior)=> api('/api/agents/'+id+'/extend/propose','POST',{ kind, instruction, prior: prior||null }).then(r=>r.extension);
   async function draft(kind, text){ if(!text.trim()) return; out.innerHTML=`<span class="muted">${t('Drafting…')}</span>`;
