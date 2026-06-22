@@ -508,10 +508,11 @@ export class AppState {
   /** Per-agent tool executor: maps each declared tool to a REAL platform backend so the agent
    *  actually performs its capabilities (web search, scheduling, WhatsApp notify, params) rather
    *  than saying it lacks them. Injected into the reply runtime's tool-use loop. */
-  private buildExecutor(agentId: string): ((name: string, input: Record<string, unknown>) => Promise<string>) | undefined {
+  private buildExecutor(agentId: string, opts?: { testMode?: boolean }): ((name: string, input: Record<string, unknown>) => Promise<string>) | undefined {
     const agent = this.agents.get(agentId);
     if (!agent) return undefined;
     const tenantId = agent.tenantId;
+    const test = opts?.testMode === true; // a faithful "test run": real read tools, but no real sends/schedules/saves
     return async (name, input) => {
       const tool = agent.spec.tools.find((t) => t.name === name);
       const k = `${name} ${tool?.description ?? ''}`.toLowerCase();
@@ -519,6 +520,7 @@ export class AppState {
       try {
         // SCHEDULE / RECURRING -> create a real (disabled) scheduled trigger.
         if (has(/\b(schedule|recurring|recur|periodic|timed|every|interval|cron)\b/)) {
+          if (test) { const c = this.parseCadence(input, tool?.description); return `(Test) Would create a recurring action "${name}" every ${c.value} ${c.unit} — not actually created during a test.`; }
           if (this.firing.size > 0) return 'A scheduled run is already in progress; not re-scheduling.';
           const { value, unit } = this.parseCadence(input, tool?.description);
           const trg = this.addTrigger(agentId, tenantId, {
@@ -533,6 +535,7 @@ export class AppState {
           const ch = this.channels.get(tenantId);
           const text = String(input.text ?? input.message ?? input.body ?? input.content ?? JSON.stringify(input));
           const chats = agent.listenChats ?? [];
+          if (test) return `(Test) Would send this WhatsApp message to ${chats.length} chat(s): "${text}". Not actually sent during a test.`;
           if (!ch) return 'WhatsApp is not linked for this account, so I could not send the message.';
           if (!chats.length) return 'No chats are selected for this agent, so there is nowhere to send to.';
           let n = 0;
@@ -541,6 +544,7 @@ export class AppState {
         }
         // UPDATE / SAVE params -> persist as agent knowledge so it's remembered next turn.
         if (has(/\b(update|set|save|store|change|configure|param|parameter)\b/)) {
+          if (test) return `(Test) Would save: ${JSON.stringify(input)} — not actually saved during a test.`;
           const label = `state:${name}`;
           agent.spec.knowledge_sources = [
             ...(agent.spec.knowledge_sources ?? []).filter((s) => s.label !== label),
@@ -1007,9 +1011,10 @@ export class AppState {
       // The improve AI has live access to the agent: it can TEST it and CHANGE it directly via tools.
       const exec = async (name: string, input: Record<string, unknown>): Promise<string> => {
         if (name === 'test_agent') {
-          const out = await this.runtime.complete({ agentId: s.agentId, messages: [{ role: 'user', content: String(input.message ?? '') }], noTools: true });
+          // Faithful test: real tools run (e.g. live data lookups), only outgoing sends are simulated.
+          const out = await this.runtime.complete({ agentId: s.agentId, messages: [{ role: 'user', content: String(input.message ?? '') }], executor: this.buildExecutor(s.agentId, { testMode: true }) });
           this.recordSpend(s.tenantId, this.runtime.lastUsage, s.agentId, agent.spec.agent_name);
-          return `The agent replied:\n"${(out.text || '(no reply)').slice(0, 1500)}"`;
+          return `The agent replied (routed via "${this.runtime.lastRoutedTo}"):\n"${(out.text || '(no reply)').slice(0, 1500)}"`;
         }
         if (name === 'apply_improvement') {
           const kind = String(input.kind);
@@ -1022,12 +1027,17 @@ export class AppState {
       };
       const sys = [
         'You are helping the OWNER improve their existing WhatsApp AI agent, and you have FULL access to it.',
-        'You can TEST it (call test_agent with a realistic user message to see exactly how it replies now, and',
-        'again after a change to verify it worked) and CHANGE it directly (call apply_improvement — kind:',
-        'context = info it should know, skill = a reusable how-to, workflow = a new task area — with a clear',
-        'instruction; the agent is paused so editing is safe). Good flow: understand the goal, test current',
-        'behavior if useful, agree on a change, apply it, then test again and report the before/after in plain,',
-        "simple language. Only apply changes the owner agreed to. Be concise and non-technical. Reply in the owner's language.",
+        'You can TEST it (call test_agent with a realistic user message — this runs the agent EXACTLY as real',
+        'users experience it: its real tools run, only outgoing WhatsApp sends are simulated) and CHANGE it',
+        'directly (call apply_improvement — kind: context = info it should know, skill = a reusable how-to,',
+        'workflow = a new task area — with a clear instruction; the agent is paused so editing is safe).',
+        'MANDATORY verification loop, no exceptions: (1) reproduce the problem with test_agent first so you see',
+        "the actual current behavior; (2) apply a change; (3) test_agent AGAIN with the same message(s) to check",
+        'it is really fixed. NEVER tell the owner it is fixed unless your most recent test_agent result actually',
+        'shows the problem gone. If the test still shows the problem, say so honestly and keep trying a different',
+        'change — do not claim success. If after a few attempts an additive change (context/skill/workflow) cannot',
+        'fix it (e.g. it conflicts with an existing instruction), tell the owner plainly what is blocking it rather',
+        "than pretending. Be concise and non-technical. Only apply changes the owner agreed to. Reply in the owner's language.",
       ].join(' ') + `\n\nCurrent agent configuration (AgentSpec):\n${JSON.stringify(agent.spec)}`;
       const r = await this.improveLlm.improveChat({ systemPrompt: sys, messages: s.messages, executeToolCall: exec });
       s.messages.push({ role: 'assistant', content: r.text });
