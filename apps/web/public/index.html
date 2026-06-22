@@ -23,6 +23,7 @@
   .tab { background:transparent; border:none; border-bottom:2px solid transparent; color:var(--muted); padding:10px 18px; border-radius:8px 8px 0 0; cursor:pointer; font:inherit; font-size:15px; }
   .tab:hover { color:var(--text); background:var(--panel2); }
   .tab.active { color:var(--accent2); border-bottom-color:var(--accent2); font-weight:600; }
+  button.busy { cursor:progress; opacity:.7; }
   header .spacer { flex:1; }
   header .who { color:var(--muted); font-size:13px; }
   button { font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--panel2); color:var(--text); padding:8px 14px; border-radius:8px; }
@@ -716,25 +717,29 @@ async function AgentDetailView(wrap, id){
     let done=false, sessionId=null, sending=false;
     const chat=card.querySelector('#imp-chat'), input=card.querySelector('#imp-msg'), sendBtn=card.querySelector('#imp-send'), actions=card.querySelector('#imp-actions');
     const addBub=(who,text)=>{ const b=$(`<div class="bub ${who}"></div>`); b.textContent=text; chat.appendChild(b); chat.scrollTop=chat.scrollHeight; };
+    const doneBtn=card.querySelector('#imp-done');
+    const setBusy=(b)=>{ sending=b; doneBtn.disabled=b; doneBtn.classList.toggle('busy', b); doneBtn.textContent = b ? t('⏳ Updating the agent…') : t('✓ Done (resume agent)'); };
+    const blockedNote=()=>{ const n=$(`<div class="bub bot muted" style="font-size:12.5px">${esc(t('Please wait — the agent is being updated. You can close once it finishes.'))}</div>`); chat.appendChild(n); chat.scrollTop=chat.scrollHeight; };
     const finish=async(doRender)=>{ if(done) return; done=true; _openDialogs.delete(finish); document.removeEventListener('keydown', onKey);
       if(sessionId){ try{ await api('/api/agents/'+id+'/improve/finish','POST',{ sessionId }); }catch{} }
       backdrop.remove(); if(doRender!==false) render(); }; // resume the agent + refresh
-    const confirmClose=async()=>{ if(await confirmDialog({ title:t('Close the improvement chat?'), message:t('Applied changes are saved. The rest of this conversation will be discarded, and the agent will resume.'), confirmLabel:t('Close chat') })) finish(); };
+    // While a turn is running (testing/applying a change), the dialog cannot be closed — never interrupt a build.
+    const confirmClose=async()=>{ if(sending){ blockedNote(); return; } if(await confirmDialog({ title:t('Close the improvement chat?'), message:t('Applied changes are saved. The rest of this conversation will be discarded, and the agent will resume.'), confirmLabel:t('Close chat') })) finish(); };
     const onKey=(e)=>{ if(e.key==='Escape') confirmClose(); };
     document.addEventListener('keydown', onKey); _openDialogs.add(finish);
     // Clicking outside the dialog does NOT close it — a mis-click must never discard the chat.
     card.querySelector('#imp-expand').onclick=()=> card.classList.toggle('modal-xl');
-    card.querySelector('#imp-done').onclick=()=>finish();
+    doneBtn.onclick=()=>{ if(sending){ blockedNote(); return; } finish(); };
     backdrop.appendChild(card); document.body.appendChild(backdrop);
     (async()=>{ try{ const s=await api('/api/agents/'+id+'/improve/start','POST'); sessionId=s.sessionId; addBub('bot', s.greeting); input.disabled=false; sendBtn.disabled=false; input.focus(); }
       catch(e){ addBub('bot', tf('⚠ {0}', e.message)); } })();
-    const send=async()=>{ const text=input.value.trim(); if(!text||sending||!sessionId) return; input.value=''; addBub('me',text); sending=true; input.disabled=true; sendBtn.disabled=true;
+    const send=async()=>{ const text=input.value.trim(); if(!text||sending||!sessionId) return; input.value=''; addBub('me',text); setBusy(true); input.disabled=true; sendBtn.disabled=true;
       const typing=$(`<div class="bub bot muted">${esc(t('typing…'))}</div>`); chat.appendChild(typing); chat.scrollTop=chat.scrollHeight;
       try{ const r=await api('/api/agents/'+id+'/improve/message','POST',{ sessionId, text }); typing.remove(); addBub('bot', r.reply);
         if(r.applied){ const n=$(`<div class="bub bot ok" style="font-size:13px">${tf('✓ Agent updated to v{0}', r.version)}</div>`); chat.appendChild(n); chat.scrollTop=chat.scrollHeight; }
         if(r.proposal) showProposal(r.proposal); }
       catch(e){ typing.remove(); addBub('bot', tf('⚠ {0}', e.message)); }
-      sending=false; input.disabled=false; sendBtn.disabled=false; input.focus(); };
+      setBusy(false); input.disabled=false; sendBtn.disabled=false; input.focus(); };
     sendBtn.onclick=send; input.addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });
 
     function showProposal(ext){
@@ -743,11 +748,12 @@ async function AgentDetailView(wrap, id){
       box.innerHTML=`<b>${tf('Proposed change — {0}', esc(ext.kind))}</b><div class="muted" style="margin:4px 0">${esc(ext.summary||'')}</div><div id="pd"></div>`;
       box.querySelector('#pd').innerHTML=renderExtDetail(ext);
       const ap=$(`<button class="primary" style="margin-top:8px">${t('Apply this change')}</button>`);
-      ap.onclick=async()=>{ ap.disabled=true;
+      ap.onclick=async()=>{ ap.disabled=true; setBusy(true);
         try{ const r=await api('/api/agents/'+id+'/improve/apply','POST',{ extension: ext });
           box.appendChild($(`<div class="ok" style="margin-top:8px">${tf('Applied — agent is now v{0}.', r.version)}</div>`));
           addBub('bot', t('Applied ✓ — anything else to improve, or click Done?')); ap.remove(); }
-        catch(e){ box.appendChild($(`<div class="err" style="margin-top:8px">${esc(e.message)}</div>`)); ap.disabled=false; } };
+        catch(e){ box.appendChild($(`<div class="err" style="margin-top:8px">${esc(e.message)}</div>`)); ap.disabled=false; }
+        setBusy(false); };
       box.appendChild(ap); actions.appendChild(box);
     }
   }
