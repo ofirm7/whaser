@@ -18,7 +18,7 @@ export class WorkflowAgentRuntime implements AgentRuntime {
     private readonly getExecutor?: (agentId: string) => ((name: string, input: Record<string, unknown>) => Promise<string>) | undefined,
   ) {}
 
-  async complete({ agentId, messages, currentTurnMedia }: { agentId: string; messages: RuntimeMessage[]; conversationId?: string; currentTurnMedia?: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string } }): Promise<AgentReply> {
+  async complete({ agentId, messages, currentTurnMedia, noTools }: { agentId: string; messages: RuntimeMessage[]; conversationId?: string; currentTurnMedia?: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string }; noTools?: boolean }): Promise<AgentReply> {
     const spec = this.getSpec(agentId);
     if (!spec) {
       this.lastRoutedTo = 'default';
@@ -33,7 +33,8 @@ export class WorkflowAgentRuntime implements AgentRuntime {
     const wmsgs = messages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-    const r = await new WorkflowEngine(spec, llm).handle(wmsgs, currentTurnMedia, this.getExecutor?.(agentId));
+    // noTools = a safe "test run" (no executor) so testing an agent never fires real side-effects (send/schedule).
+    const r = await new WorkflowEngine(spec, llm).handle(wmsgs, currentTurnMedia, noTools ? undefined : this.getExecutor?.(agentId));
     this.lastRoutedTo = r.routedTo;
     this.lastUsage = r.usage;
     return { text: r.text, usage: r.usage, finishReason: 'stop' };
