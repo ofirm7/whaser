@@ -729,7 +729,7 @@ async function AgentDetailView(wrap, id){
     document.addEventListener('keydown', onKey); _openDialogs.add(finish);
     // Clicking outside the dialog does NOT close it — a mis-click must never discard the chat.
     card.querySelector('#imp-expand').onclick=()=> card.classList.toggle('modal-xl');
-    doneBtn.onclick=()=>{ if(sending){ blockedNote(); return; } finish(); };
+    doneBtn.onclick=()=> confirmClose(); // asks "are you sure?" first (and is blocked while a change is building)
     backdrop.appendChild(card); document.body.appendChild(backdrop);
     (async()=>{ try{ const s=await api('/api/agents/'+id+'/improve/start','POST'); sessionId=s.sessionId; addBub('bot', s.greeting); input.disabled=false; sendBtn.disabled=false; input.focus(); }
       catch(e){ addBub('bot', tf('⚠ {0}', e.message)); } })();
