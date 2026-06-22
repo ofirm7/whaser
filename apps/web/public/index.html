@@ -430,24 +430,33 @@ function Header(){
 }
 
 // Demo top-up: add AI credit. (No real payment in this POC.)
-function topUpDialog(){
+async function topUpDialog(){
   const backdrop=$('<div class="modal-backdrop"></div>');
   const card=$('<div class="card modal"></div>');
-  card.innerHTML=`<h2>${t('Add credit')}</h2>
-    <div class="muted" style="margin-bottom:10px">${tf('Your balance now: ${0}.', (billing.balance||0).toFixed(2))} ${t('Your agents pause when it reaches $0, and start working again once you go above $1.')}</div>
-    <div class="row" style="gap:8px">
+  backdrop.appendChild(card); document.body.appendChild(backdrop);
+  const close=()=>{ backdrop.remove(); };
+  backdrop.onclick=(e)=>{ if(e.target===backdrop) close(); };
+  card.innerHTML=`<span class="muted">${t('Loading…')}</span>`;
+  let data=billing, usage=[];
+  try{ data=await api('/api/billing'); billing={balance:data.balance,blocked:data.blocked,resumeAbove:data.resumeAbove}; usage=data.usage||[]; }catch{}
+  const ub = usage.length
+    ? `<div style="margin-top:16px"><b>${t('What is using your balance')}</b><div style="margin-top:6px;max-height:200px;overflow:auto">`+
+        usage.map(u=>`<div class="row" style="justify-content:space-between;gap:10px;font-size:13px;padding:5px 0;border-top:1px solid var(--line)"><span dir="auto" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.name)}</span><span class="muted" style="flex:0 0 auto">$${(u.dollars||0).toFixed(4)} · ${u.calls} ${t('uses')}</span></div>`).join('')+`</div></div>`
+    : `<div class="muted" style="margin-top:16px;font-size:12.5px">${t('No AI usage recorded yet.')}</div>`;
+  card.innerHTML=`<h2>${t('Balance & usage')}</h2>
+    <div class="muted" style="margin-bottom:10px">${tf('Your balance now: ${0}.', (data.balance||0).toFixed(2))} ${t('Your agents pause when it reaches $0, and start working again once you go above $1.')}</div>
+    <b>${t('Add credit')}</b>
+    <div class="row" style="gap:8px;margin-top:6px">
       <button class="primary" data-amt="5" style="flex:1">+ $5</button>
       <button class="primary" data-amt="10" style="flex:1">+ $10</button>
       <button class="primary" data-amt="20" style="flex:1">+ $20</button></div>
-    <div class="muted" style="margin-top:10px;font-size:12px">${t('Demo only — no real payment is charged.')}</div>
+    <div class="muted" style="margin-top:8px;font-size:12px">${t('Demo only — no real payment is charged.')}</div>
+    ${ub}
     <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" id="tu-x">${t('Close')}</button></div>`;
-  const close=()=>{ backdrop.remove(); };
-  backdrop.onclick=(e)=>{ if(e.target===backdrop) close(); };
   card.querySelector('#tu-x').onclick=close;
   card.querySelectorAll('[data-amt]').forEach(b=> b.onclick=async()=>{ b.disabled=true;
-    try{ billing = await api('/api/billing/topup','POST',{ amount:Number(b.dataset.amt) }); close(); render(); }
+    try{ const r=await api('/api/billing/topup','POST',{ amount:Number(b.dataset.amt) }); billing={balance:r.balance,blocked:r.blocked,resumeAbove:r.resumeAbove}; close(); render(); }
     catch(e){ alert(e.message); b.disabled=false; } });
-  backdrop.appendChild(card); document.body.appendChild(backdrop);
 }
 
 function LoginView(){
