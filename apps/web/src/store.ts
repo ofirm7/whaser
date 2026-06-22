@@ -434,6 +434,13 @@ export class AppState {
     return Math.max(1, Math.min(9999, Math.round(Number(v) || 1)));
   }
 
+  /** Never let a trigger run faster than once a minute — avoids token/cost runaways + WhatsApp spam. */
+  private clampCadence(value: number, unit: TimeUnit): { value: number; unit: TimeUnit } {
+    const MS: Record<TimeUnit, number> = { second: 1000, minute: 60000, hour: 3_600_000, day: 86_400_000, week: 604_800_000 };
+    if ((value || 1) * MS[unit] < 60_000) return { value: 1, unit: 'minute' };
+    return { value, unit };
+  }
+
   /** Create a scheduled trigger. ALWAYS created disabled — the owner enables it explicitly. */
   addTrigger(agentId: string, tenantId: string, cfg: { label?: unknown; prompt?: unknown; value?: unknown; unit?: unknown; enabled?: unknown; toolName?: unknown }): AgentTrigger {
     const agent = this.getAgent(agentId, tenantId);
@@ -441,13 +448,14 @@ export class AppState {
     const prompt = String(cfg.prompt ?? '').trim();
     if (!prompt) throw new Error('a trigger needs an action prompt');
     const now = this.now();
+    const cad = this.clampCadence(this.clampInterval(cfg.value), this.normalizeUnit(cfg.unit));
     const trigger: AgentTrigger = {
       id: this.id('trg'),
       label: String(cfg.label ?? '').trim() || 'Timed action',
       prompt,
       enabled: cfg.enabled === true,
-      value: this.clampInterval(cfg.value),
-      unit: this.normalizeUnit(cfg.unit),
+      value: cad.value,
+      unit: cad.unit,
       toolName: typeof cfg.toolName === 'string' ? cfg.toolName : undefined,
       lastRunAt: null,
       lastStatus: null,
@@ -576,6 +584,7 @@ export class AppState {
     if (patch.prompt !== undefined) { const p = String(patch.prompt).trim(); if (p) trigger.prompt = p; }
     if (patch.value !== undefined) trigger.value = this.clampInterval(patch.value);
     if (patch.unit !== undefined) trigger.unit = this.normalizeUnit(patch.unit);
+    if (patch.value !== undefined || patch.unit !== undefined) { const c = this.clampCadence(trigger.value, trigger.unit); trigger.value = c.value; trigger.unit = c.unit; }
     if (patch.enabled !== undefined) {
       const wasEnabled = trigger.enabled;
       trigger.enabled = patch.enabled === true;
