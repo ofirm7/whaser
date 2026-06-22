@@ -949,6 +949,50 @@ export class AppState {
     return agent;
   }
 
+  // --- Conversational "improve this agent" chat (agent is paused while improving) ---
+  private readonly improveSessions = new Map<string, { agentId: string; tenantId: string; owner: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; prevStatus: 'live' | 'paused' }>();
+
+  /** Start an improvement chat: PAUSE the agent (suspended while improving) and open a session. */
+  startImprove(agentId: string, tenantId: string, owner: string): { sessionId: string; greeting: string; agentName: string } | null {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) return null;
+    const prevStatus = agent.status; // restore this when the chat finishes
+    agent.status = 'paused'; // suspended until improvements are approved + done
+    this.persist();
+    const id = this.id('imp');
+    this.improveSessions.set(id, { agentId, tenantId, owner, messages: [], prevStatus });
+    return { sessionId: id, agentName: agent.spec.agent_name, greeting: `Your agent "${agent.spec.agent_name}" is paused while we improve it. What would you like to change or add? (For example: info it should know, a new skill, or a new task it can handle.)` };
+  }
+
+  /** One improvement-chat turn: the AI replies and, when a change is agreed, returns a proposal to approve. */
+  async improveMessage(sessionId: string, owner: string, text: string): Promise<{ reply: string; proposal: SpecExtension | null } | null> {
+    const s = this.improveSessions.get(sessionId);
+    if (!s || s.owner !== owner) return null;
+    const agent = this.getAgent(s.agentId, s.tenantId);
+    if (!agent) return null;
+    if (!this.canSpend(s.tenantId)) throw new Error('Your balance is empty — add credit (above $1) to keep improving.');
+    s.messages.push({ role: 'user', content: text });
+    const r = await this.extender.improveInterview({ spec: agent.spec, messages: s.messages });
+    s.messages.push({ role: 'assistant', content: r.reply });
+    let proposal: SpecExtension | null = null;
+    if (r.proposeKind !== 'none' && r.proposeInstruction.trim()) {
+      try { proposal = await this.extender.propose({ spec: agent.spec, kind: r.proposeKind, instruction: r.proposeInstruction, prior: null }); } catch { proposal = null; }
+    }
+    this.recordSpendText(s.tenantId, text + JSON.stringify(agent.spec).slice(0, 2000), r.reply + JSON.stringify(proposal ?? ''), s.agentId, agent.spec.agent_name);
+    return { reply: r.reply, proposal };
+  }
+
+  /** Finish the improvement chat: RESUME the agent (restore its pre-improve status) and close the session. */
+  finishImprove(sessionId: string, owner: string): { status: 'live' | 'paused' } | null {
+    const s = this.improveSessions.get(sessionId);
+    if (!s || s.owner !== owner) return null;
+    this.improveSessions.delete(sessionId);
+    const agent = this.getAgent(s.agentId, s.tenantId);
+    const status = s.prevStatus;
+    if (agent) { agent.status = status; this.persist(); }
+    return { status };
+  }
+
   // --- Extend an existing agent: Context / Skills / Workflows ---
   /** AI-draft a spec extension (prior powers the "Ask Changes" loop). */
   async proposeExtension(agentId: string, tenantId: string, kind: ExtensionKind, instruction: string, prior?: SpecExtension | null): Promise<SpecExtension | null> {

@@ -680,27 +680,56 @@ async function AgentDetailView(wrap, id){
   sim.querySelector('#send').onclick = send;
   sim.querySelector('#msg').addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });
 
-  // Self-improvement panel
+  // Improve this agent — a real chat that pauses the agent, applies approved changes, then resumes it.
   const imp = $('<div class="card"></div>');
-  imp.innerHTML = `<h2>${t('Self-improvement')}</h2><div class="muted" style="margin-bottom:8px">${t('Tell the agent what to improve (optional), then get editable suggestions you approve — approved changes bump the version. Leave blank to suggest from recent chats.')}</div>
-    <textarea id="suggestguide" rows="2" placeholder="${t('e.g. be more formal; stop answering legal questions; add our refund policy')}"></textarea>
-    <button id="suggest" style="margin-top:6px">${t('Suggest improvements')}</button><div id="sugg" style="margin-top:10px"></div>`;
+  imp.innerHTML = `<h2>${t('Improve this agent')}</h2><div class="muted" style="margin-bottom:8px">${t('Open a chat to talk through and apply improvements. The agent is paused while you work, and goes live again when you finish.')}</div>
+    <button class="primary" id="improve">${t('✨ Improve in a chat')}</button>`;
   wrap.appendChild(imp);
-  imp.querySelector('#suggest').onclick = async ()=>{ const box=imp.querySelector('#sugg'); const instruction=imp.querySelector('#suggestguide').value.trim(); box.innerHTML='<span class="muted">'+(instruction?t('Drafting improvements…'):t('Analyzing transcripts…'))+'</span>';
-    try{ const r = await api('/api/agents/'+id+'/suggest','POST',{ instruction });
-      if(!r.suggestions.length){ box.innerHTML='<span class="muted">'+tf('{0} Add guidance above, or chat with the agent first.', esc(r.summary))+'</span>'; return; }
-      box.innerHTML = '<div class="muted" style="margin-bottom:8px">'+esc(r.summary)+'</div>';
-      r.suggestions.forEach((s,i)=>{ const row=$('<label style="display:block;margin:6px 0"></label>');
-        row.innerHTML = `<input type="checkbox" data-i="${i}" checked/> <b>${esc(s.kind)}</b> — ${esc(s.value)} <span class="muted">(${esc(s.rationale)})</span>`;
-        box.appendChild(row); });
-      const apply=$(`<button class="primary" style="margin-top:10px">${t('Apply selected')}</button>`);
-      apply.onclick = async ()=>{ apply.disabled=true;
-        const chosen=[...box.querySelectorAll('input[type=checkbox]')].filter(c=>c.checked).map(c=>r.suggestions[+c.dataset.i]);
-        const res = await api('/api/agents/'+id+'/apply','POST',{ suggestions: chosen });
-        box.appendChild($(`<div class="ok" style="margin-top:8px">${tf('Applied — agent is now v{0}. Reloading…', res.version)}</div>`));
-        setTimeout(()=>render(),800); };
-      box.appendChild(apply);
-    }catch(err){ box.innerHTML='<span class="err">'+esc(err.message)+'</span>'; } };
+  imp.querySelector('#improve').onclick = ()=> improveChat();
+
+  function improveChat(){
+    const backdrop=$('<div class="modal-backdrop"></div>');
+    const card=$('<div class="card modal wide" role="dialog" aria-modal="true"></div>');
+    card.innerHTML=`<h2 style="margin-bottom:4px">${t('Improve this agent')}</h2>
+      <div class="card" style="border-color:var(--accent2);background:rgba(6,207,156,.08);padding:8px 10px;margin-bottom:8px"><b>⏸ ${t('Agent paused while you improve it')}</b> <span class="muted">${t('— it goes live again when you click Done.')}</span></div>
+      <div class="chat" id="imp-chat" style="height:300px"></div>
+      <div class="composer"><input id="imp-msg" placeholder="${t('What should we improve?')}" disabled/><button class="primary" id="imp-send" disabled>${t('Send')}</button></div>
+      <div id="imp-actions" style="margin-top:10px"></div>
+      <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="primary" id="imp-done">${t('✓ Done (resume agent)')}</button></div>`;
+    let done=false, sessionId=null, sending=false;
+    const chat=card.querySelector('#imp-chat'), input=card.querySelector('#imp-msg'), sendBtn=card.querySelector('#imp-send'), actions=card.querySelector('#imp-actions');
+    const addBub=(who,text)=>{ const b=$(`<div class="bub ${who}"></div>`); b.textContent=text; chat.appendChild(b); chat.scrollTop=chat.scrollHeight; };
+    const finish=async(doRender)=>{ if(done) return; done=true; _openDialogs.delete(finish); document.removeEventListener('keydown', onKey);
+      if(sessionId){ try{ await api('/api/agents/'+id+'/improve/finish','POST',{ sessionId }); }catch{} }
+      backdrop.remove(); if(doRender!==false) render(); }; // resume the agent + refresh
+    const onKey=(e)=>{ if(e.key==='Escape') finish(); };
+    document.addEventListener('keydown', onKey); _openDialogs.add(finish);
+    backdrop.onclick=(e)=>{ if(e.target===backdrop) finish(); };
+    card.querySelector('#imp-done').onclick=()=>finish();
+    backdrop.appendChild(card); document.body.appendChild(backdrop);
+    (async()=>{ try{ const s=await api('/api/agents/'+id+'/improve/start','POST'); sessionId=s.sessionId; addBub('bot', s.greeting); input.disabled=false; sendBtn.disabled=false; input.focus(); }
+      catch(e){ addBub('bot', tf('⚠ {0}', e.message)); } })();
+    const send=async()=>{ const text=input.value.trim(); if(!text||sending||!sessionId) return; input.value=''; addBub('me',text); sending=true; input.disabled=true; sendBtn.disabled=true;
+      const typing=$(`<div class="bub bot muted">${esc(t('typing…'))}</div>`); chat.appendChild(typing); chat.scrollTop=chat.scrollHeight;
+      try{ const r=await api('/api/agents/'+id+'/improve/message','POST',{ sessionId, text }); typing.remove(); addBub('bot', r.reply); if(r.proposal) showProposal(r.proposal); }
+      catch(e){ typing.remove(); addBub('bot', tf('⚠ {0}', e.message)); }
+      sending=false; input.disabled=false; sendBtn.disabled=false; input.focus(); };
+    sendBtn.onclick=send; input.addEventListener('keydown', e=>{ if(e.key==='Enter') send(); });
+
+    function showProposal(ext){
+      actions.innerHTML='';
+      const box=$('<div class="card" style="border-color:var(--accent)"></div>');
+      box.innerHTML=`<b>${tf('Proposed change — {0}', esc(ext.kind))}</b><div class="muted" style="margin:4px 0">${esc(ext.summary||'')}</div><div id="pd"></div>`;
+      box.querySelector('#pd').innerHTML=renderExtDetail(ext);
+      const ap=$(`<button class="primary" style="margin-top:8px">${t('Apply this change')}</button>`);
+      ap.onclick=async()=>{ ap.disabled=true;
+        try{ const r=await api('/api/agents/'+id+'/improve/apply','POST',{ extension: ext });
+          box.appendChild($(`<div class="ok" style="margin-top:8px">${tf('Applied — agent is now v{0}.', r.version)}</div>`));
+          addBub('bot', t('Applied ✓ — anything else to improve, or click Done?')); ap.remove(); }
+        catch(e){ box.appendChild($(`<div class="err" style="margin-top:8px">${esc(e.message)}</div>`)); ap.disabled=false; } };
+      box.appendChild(ap); actions.appendChild(box);
+    }
+  }
 
   // --- Extend agent: Context / Skills / Workflows ---
   function renderExtDetail(ext){
