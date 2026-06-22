@@ -56,6 +56,12 @@ export class BaileysChannel {
   private readonly ownerStyle: string[] = [];
   private readonly styleFile: string;
   private styleSaveTimer: any = null;
+  // Per-chat recent message turns (text only) — replayed to seed an agent's memory of a thread so it
+  // knows the conversation that already happened, not just messages received after it was linked.
+  private readonly threadHistory = new Map<string, { fromMe: boolean; text: string; ts: number }[]>();
+  private readonly historyFile: string;
+  private historySaveTimer: any = null;
+  private static readonly HISTORY_PER_CHAT = 50;
 
   /** Per-tenant channel: `slug` namespaces the auth/chat/style files so each user links their own
    *  WhatsApp. onInbound receives (chatJid, senderId, text) and returns the reply text (or null). */
@@ -65,6 +71,7 @@ export class BaileysChannel {
     this.authDir = fileURLToPath(new URL('../.wa-auth/' + safe, import.meta.url));
     this.chatsFile = fileURLToPath(new URL('../.data/wa-chats-' + safe + '.json', import.meta.url));
     this.styleFile = fileURLToPath(new URL('../.data/wa-owner-style-' + safe + '.json', import.meta.url));
+    this.historyFile = fileURLToPath(new URL('../.data/wa-history-' + safe + '.json', import.meta.url));
     try {
       if (existsSync(this.chatsFile)) {
         const arr = JSON.parse(readFileSync(this.chatsFile, 'utf8'));
@@ -75,6 +82,17 @@ export class BaileysChannel {
       if (existsSync(this.styleFile)) {
         const arr = JSON.parse(readFileSync(this.styleFile, 'utf8'));
         if (Array.isArray(arr)) for (const s of arr) if (typeof s === 'string') this.ownerStyle.push(s);
+      }
+    } catch { /* ignore */ }
+    try {
+      if (existsSync(this.historyFile)) {
+        const obj = JSON.parse(readFileSync(this.historyFile, 'utf8'));
+        if (obj && typeof obj === 'object') for (const [jid, arr] of Object.entries(obj)) {
+          if (Array.isArray(arr)) this.threadHistory.set(jid, arr
+            .filter((m: any) => m && typeof m.text === 'string')
+            .map((m: any) => ({ fromMe: !!m.fromMe, text: String(m.text), ts: Number(m.ts) || 0 }))
+            .slice(-BaileysChannel.HISTORY_PER_CHAT));
+        }
       }
     } catch { /* ignore */ }
   }
@@ -114,6 +132,59 @@ export class BaileysChannel {
         writeFileSync(this.chatsFile, JSON.stringify([...this.chats.values()]));
       } catch { /* ignore */ }
     }, 1500);
+  }
+
+  /** Extract displayable text from a raw Baileys message (unwraps view-once; labels media). */
+  private static textOf(message: any): string {
+    if (!message) return '';
+    const c = message.viewOnceMessage?.message ?? message.viewOnceMessageV2?.message ?? message;
+    const doc = c.documentMessage ?? c.documentWithCaptionMessage?.message?.documentMessage;
+    const t = c.conversation ?? c.extendedTextMessage?.text ?? c.imageMessage?.caption ?? c.videoMessage?.caption ?? doc?.caption;
+    if (t) return String(t);
+    if (c.imageMessage || c.stickerMessage) return '[image]';
+    if (doc) return `[document: ${doc.fileName ?? 'document'}]`;
+    if (c.audioMessage) return '[voice message]';
+    if (c.videoMessage) return '[video]';
+    return '';
+  }
+
+  /** The @s.whatsapp.net / @g.us form of a message key (Baileys 7.x may primary-address a 1:1 as @lid). */
+  private static pnJidOf(key: any): string | null {
+    return [key?.remoteJid ?? '', key?.remoteJidAlt ?? ''].find((j) => j && (j.endsWith('@s.whatsapp.net') || j.endsWith('@g.us'))) ?? null;
+  }
+
+  /** Append one turn to a chat's recent-history buffer (bounded per chat, persisted, debounced). */
+  private recordHistory(jid: string | null, fromMe: boolean, text: string, tsMs: number): void {
+    const t = (text ?? '').trim();
+    if (!t || !jid || !(jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us'))) return;
+    const body = t.slice(0, 2000);
+    const ts = tsMs || 0;
+    const arr = this.threadHistory.get(jid) ?? [];
+    // Skip a turn we already captured — the same message can arrive via the disk-loaded buffer AND
+    // the link-time history sync (same ts + direction + text), which would otherwise double it.
+    if (arr.some((m) => m.ts === ts && m.fromMe === fromMe && m.text === body)) return;
+    arr.push({ fromMe, text: body, ts });
+    if (arr.length > BaileysChannel.HISTORY_PER_CHAT) arr.splice(0, arr.length - BaileysChannel.HISTORY_PER_CHAT);
+    this.threadHistory.set(jid, arr);
+    this.saveHistory();
+  }
+
+  private saveHistory(): void {
+    if (this.historySaveTimer) return;
+    this.historySaveTimer = setTimeout(() => {
+      this.historySaveTimer = null;
+      try {
+        const dir = dirname(this.historyFile);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(this.historyFile, JSON.stringify(Object.fromEntries(this.threadHistory)));
+      } catch { /* ignore */ }
+    }, 1500);
+  }
+
+  /** A chat's recent turns in chronological order — used to seed an agent's memory of the thread. */
+  recentHistory(jid: string, limit = 20): { fromMe: boolean; text: string }[] {
+    const arr = [...(this.threadHistory.get(jid) ?? [])].sort((a, b) => a.ts - b.ts);
+    return arr.slice(-limit).map((m) => ({ fromMe: m.fromMe, text: m.text }));
   }
 
   getStatus(): { status: LinkStatus; qrDataUrl: string | null; me: string | null } {
@@ -232,8 +303,13 @@ export class BaileysChannel {
     sock.ev.on('messaging-history.set', (h: any) => {
       for (const c of h?.contacts ?? []) this.recordChat(c.id, contactName(c));
       for (const c of h?.chats ?? []) this.recordChat(c.id, c.name, c.conversationTimestamp ?? c.lastMessageRecvTimestamp);
-      for (const m of h?.messages ?? []) { // bootstrap the owner's style from recent self-authored history
-        if (m?.key?.fromMe) { const t = m.message?.conversation ?? m.message?.extendedTextMessage?.text ?? ''; if (t) this.recordOwnerMessage(t); }
+      for (const m of h?.messages ?? []) {
+        try {
+          const jid = BaileysChannel.pnJidOf(m?.key);
+          const text = BaileysChannel.textOf(m?.message);
+          if (jid && text) this.recordHistory(jid, !!m?.key?.fromMe, text, toMs(m?.messageTimestamp)); // seed thread memory from the sync
+          if (m?.key?.fromMe) { const t = m.message?.conversation ?? m.message?.extendedTextMessage?.text ?? ''; if (t) this.recordOwnerMessage(t); } // bootstrap owner style
+        } catch { /* skip a malformed history entry */ }
       }
     });
     sock.ev.on('contacts.upsert', (cs: any[]) => { for (const c of cs ?? []) this.recordChat(c.id, contactName(c)); });
@@ -347,10 +423,18 @@ export class BaileysChannel {
         const from = this.numberOf(jid);
         try {
           const reply = await this.onInbound(jid, from, effectiveText, media, { fromMe, isSelf });
-          if (reply) { const sent = await sock.sendMessage(jid, { text: reply }); const sid = sent?.key?.id; if (sid) this.sentIds.add(sid); }
+          if (reply) {
+            const sent = await sock.sendMessage(jid, { text: reply });
+            const sid = sent?.key?.id;
+            if (sid) this.sentIds.add(sid);
+            this.recordHistory(jid, true, reply, Math.max(Date.now(), toMs(m.messageTimestamp) + 1)); // reply must sort AFTER the inbound it answers (WhatsApp clock may lead ours)
+          }
         } catch (e) {
           console.error('[baileys] inbound error', e);
         }
+        // Remember this turn AFTER routing, so a cold-thread seed (in handleChannelInbound) doesn't
+        // double-count the message it's currently answering.
+        this.recordHistory(jid, fromMe, effectiveText, toMs(m.messageTimestamp));
       }
     });
   }

@@ -318,6 +318,10 @@ export class AppState {
     const waMessageId = `ch-${++this.seq}`;
     const key = this.chatKey(tenantId, jid); // tenant-scoped so two users can't collide on a contact
     const msg: InboundMessage = { waMessageId, from, phoneNumberId: key, type: 'text', text, currentTurnMedia: media, timestamp: this.now() };
+    // Seed the agent's memory from the chat's existing WhatsApp history the first time it answers in
+    // this thread — so it knows the conversation so far instead of starting cold (the runtime is
+    // stateless; Whaser owns + replays history). No-op once the thread already has memory.
+    await this.seedThreadHistory(tenantId, jid, from);
     const out = await this.handler(msg);
     const blocked = this.lastBlock.get(waMessageId) ?? null;
     const routedTo = out ? this.runtime.lastRoutedTo : null;
@@ -333,6 +337,24 @@ export class AppState {
       this.logActivity({ ts: this.now(), tenantId: route.tenantId, agentId: route.agentId, agentName: a?.spec.agent_name ?? route.agentId, channel: 'whatsapp', chatId: jid, from, text, routedTo, reply: out?.text ?? null, blocked });
     }
     return { reply: out?.text ?? null, routedTo, blocked };
+  }
+
+  /** First message only: prime the conversation store for (agent, contact) from the WhatsApp thread's
+   *  existing messages, so the agent is aware of what was already said rather than starting cold.
+   *  Idempotent — skips once the thread has any stored memory, so it never duplicates or overwrites
+   *  the live history. Owner-authored turns map to the assistant role (the agent replies AS the owner). */
+  private async seedThreadHistory(tenantId: string, jid: string, from: string): Promise<void> {
+    const route = await this.resolver.resolve(this.chatKey(tenantId, jid));
+    if (!route) return;
+    const key = conversationKey(route.agentId, hashSender(from, SALT));
+    if ((await this.conversations.history(key)).length) return; // already has memory — never reseed
+    // Seed below the store's 20-message cap so the very first turn (user + reply, appended by the
+    // handler right after) doesn't immediately evict the oldest seeded messages.
+    const prior = this.channels.get(tenantId)?.recentHistory(jid, 18) ?? [];
+    const seeded: RuntimeMessage[] = prior
+      .map((m) => ({ role: m.fromMe ? ('assistant' as const) : ('user' as const), content: m.text.trim() }))
+      .filter((m) => m.content);
+    if (seeded.length) await this.conversations.append(key, ...seeded);
   }
 
   // --- Per-user QR-linked personal WhatsApp (Baileys; POC only) ---
@@ -982,7 +1004,7 @@ export class AppState {
   }
 
   // --- Conversational "improve this agent" chat (agent is paused while improving) ---
-  private readonly improveSessions = new Map<string, { agentId: string; tenantId: string; owner: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; prevStatus: 'live' | 'paused' }>();
+  private readonly improveSessions = new Map<string, { agentId: string; tenantId: string; owner: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; prevStatus: 'live' | 'paused'; testConvo: RuntimeMessage[] }>();
 
   /** Start an improvement chat: PAUSE the agent (suspended while improving) and open a session. */
   startImprove(agentId: string, tenantId: string, owner: string): { sessionId: string; greeting: string; agentName: string } | null {
@@ -992,7 +1014,7 @@ export class AppState {
     agent.status = 'paused'; // suspended until improvements are approved + done
     this.persist();
     const id = this.id('imp');
-    this.improveSessions.set(id, { agentId, tenantId, owner, messages: [], prevStatus });
+    this.improveSessions.set(id, { agentId, tenantId, owner, messages: [], prevStatus, testConvo: [] });
     return { sessionId: id, agentName: agent.spec.agent_name, greeting: `Your agent "${agent.spec.agent_name}" is paused while we improve it. What would you like to change or add? (For example: info it should know, a new skill, or a new task it can handle.)` };
   }
 
@@ -1012,8 +1034,14 @@ export class AppState {
       const exec = async (name: string, input: Record<string, unknown>): Promise<string> => {
         if (name === 'test_agent') {
           // Faithful test: real tools run (e.g. live data lookups), only outgoing sends are simulated.
-          const out = await this.runtime.complete({ agentId: s.agentId, messages: [{ role: 'user', content: String(input.message ?? '') }], executor: this.buildExecutor(s.agentId, { testMode: true }) });
+          // Consecutive test_agent calls form ONE ongoing conversation (pass fresh:true to start over),
+          // so memory ("does it remember earlier messages?") can actually be reproduced and verified.
+          if (input.fresh === true) s.testConvo = [];
+          s.testConvo.push({ role: 'user', content: String(input.message ?? '') });
+          const out = await this.runtime.complete({ agentId: s.agentId, messages: s.testConvo, executor: this.buildExecutor(s.agentId, { testMode: true }) });
           this.recordSpend(s.tenantId, this.runtime.lastUsage, s.agentId, agent.spec.agent_name);
+          s.testConvo.push({ role: 'assistant', content: out.text ?? '' });
+          if (s.testConvo.length > 20) s.testConvo = s.testConvo.slice(-20);
           return `The agent replied (routed via "${this.runtime.lastRoutedTo}"):\n"${(out.text || '(no reply)').slice(0, 1500)}"`;
         }
         if (name === 'apply_improvement') {
@@ -1037,7 +1065,9 @@ export class AppState {
         'shows the problem gone. If the test still shows the problem, say so honestly and keep trying a different',
         'change — do not claim success. If after a few attempts an additive change (context/skill/workflow) cannot',
         'fix it (e.g. it conflicts with an existing instruction), tell the owner plainly what is blocking it rather',
-        "than pretending. Be concise and non-technical. Only apply changes the owner agreed to. Reply in the owner's language.",
+        'than pretending. Consecutive test_agent calls continue ONE conversation, so to check whether the agent',
+        'remembers earlier messages, send a few in a row (it now carries the existing chat history) and use',
+        "fresh=true to start over. Be concise and non-technical. Only apply changes the owner agreed to. Reply in the owner's language.",
       ].join(' ') + `\n\nCurrent agent configuration (AgentSpec):\n${JSON.stringify(agent.spec)}`;
       const r = await this.improveLlm.improveChat({ systemPrompt: sys, messages: s.messages, executeToolCall: exec });
       s.messages.push({ role: 'assistant', content: r.text });

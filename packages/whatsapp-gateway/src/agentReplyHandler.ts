@@ -55,9 +55,13 @@ export function createAgentReplyHandler(opts: AgentReplyHandlerOptions): Inbound
     });
 
     opts.breaker.record(route.tenantId, reply.usage.inputTokens + reply.usage.outputTokens);
-    await opts.conversations.append(key, userMessage, { role: 'assistant', content: reply.text });
-
-    if (!reply.text) return null;
-    return { to: msg.from, text: reply.text };
+    // Always remember the user turn; only record the assistant turn when it actually said something —
+    // a blank assistant message would otherwise pollute the history that later turns (and seeding) replay.
+    if (reply.text) {
+      await opts.conversations.append(key, userMessage, { role: 'assistant', content: reply.text });
+      return { to: msg.from, text: reply.text };
+    }
+    await opts.conversations.append(key, userMessage);
+    return null;
   };
 }
