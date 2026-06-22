@@ -25,6 +25,8 @@ export type SpecExtension = ContextExtension | SkillExtension | WorkflowExtensio
 /** Propose a spec extension from a user's request (prior powers the "Ask Changes" loop). Mockable. */
 export interface Extender {
   propose(args: { spec: AgentSpec; kind: ExtensionKind; instruction: string; prior?: SpecExtension | null }): Promise<SpecExtension>;
+  /** One conversational turn of the "improve this agent" chat: reply + (when agreed) a change to propose. */
+  improveInterview(args: { spec: AgentSpec; messages: Array<{ role: 'user' | 'assistant'; content: string }> }): Promise<{ reply: string; proposeKind: ExtensionKind | 'none'; proposeInstruction: string }>;
 }
 
 const TOOL_SCHEMA = {
@@ -172,6 +174,29 @@ const SYS: Record<ExtensionKind, string> = {
     'list them in tool_names; otherwise newTools=[] and tool_names must reference existing tools. Summary in `summary`.',
 };
 
+const IMPROVE_SYS = [
+  'You are helping the OWNER improve their existing WhatsApp AI agent (its current AgentSpec is given).',
+  'Have a natural, plain-language conversation: understand what they want to improve, investigate the',
+  'current setup, ask one short clarifying question at a time, and suggest concrete improvements. The',
+  'audience is NON-technical — keep it simple, warm, and jargon-free.',
+  'When (and only when) you and the owner have agreed on a SPECIFIC change to apply now, set propose_kind',
+  'to one of: context (add knowledge/info it should know), skill (a reusable how-to), or workflow (a new',
+  'task area / sub-agent); and put a clear, complete instruction in propose_instruction describing exactly',
+  'the change to make. Otherwise set propose_kind="none" and keep the conversation going. After a change is',
+  'applied, you can propose more or tell them they are all set. Always reply in the owner\'s language.',
+].join(' ');
+
+const IMPROVE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['reply', 'propose_kind', 'propose_instruction'],
+  properties: {
+    reply: { type: 'string', description: 'Your next message to the owner — plain, simple, friendly.' },
+    propose_kind: { type: 'string', enum: ['none', 'context', 'skill', 'workflow'], description: "Only set to a kind when a specific change is agreed to apply now; else 'none'." },
+    propose_instruction: { type: 'string', description: 'When propose_kind is not none, a clear instruction describing exactly the change; else empty.' },
+  },
+};
+
 /** Claude-backed extender (structured output). Inject an AnthropicLike client. */
 export class AnthropicExtender implements Extender {
   private readonly client: AnthropicLike;
@@ -201,5 +226,23 @@ export class AnthropicExtender implements Extender {
     const text = res.content.find((b) => b.type === 'text')?.text;
     if (!text) throw new Error('Extender returned no content');
     return { kind, ...(JSON.parse(text) as object) } as SpecExtension;
+  }
+
+  async improveInterview({ spec, messages }: { spec: AgentSpec; messages: Array<{ role: 'user' | 'assistant'; content: string }> }): Promise<{ reply: string; proposeKind: ExtensionKind | 'none'; proposeInstruction: string }> {
+    const res = await this.client.messages.create({
+      model: this.model,
+      max_tokens: 1024,
+      thinking: { type: 'adaptive' },
+      output_config: { format: { type: 'json_schema', schema: IMPROVE_SCHEMA } },
+      system: IMPROVE_SYS,
+      messages: [{ role: 'user', content: `Current AgentSpec:\n${JSON.stringify(spec)}` }, ...messages],
+    });
+    if (res.stop_reason === 'refusal') throw new Error('Model refused to continue');
+    const text = res.content.find((b) => b.type === 'text')?.text;
+    if (!text) throw new Error('Improver returned no content');
+    const out = JSON.parse(text) as { reply?: string; propose_kind?: string; propose_instruction?: string };
+    if (!out.reply) throw new Error('Improver returned no message');
+    const k = out.propose_kind;
+    return { reply: out.reply, proposeKind: k === 'context' || k === 'skill' || k === 'workflow' ? k : 'none', proposeInstruction: out.propose_instruction ?? '' };
   }
 }

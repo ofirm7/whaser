@@ -311,6 +311,32 @@ app.post('/api/agents/:id/suggest', wrap(async (req, res, auth) => {
   res.json(r);
 }));
 
+// --- Conversational "improve this agent" chat (agent paused while improving) ---
+app.post('/api/agents/:id/improve/start', wrap(async (req, res, auth) => {
+  const r = state.startImprove(req.params.id, auth.tenantId, auth.username);
+  if (!r) { res.sendStatus(404); return; }
+  res.json(r);
+}));
+app.post('/api/agents/:id/improve/message', wrap(async (req, res, auth) => {
+  const { sessionId, text } = (req.body ?? {}) as { sessionId?: string; text?: string };
+  const t = String(text ?? '').trim();
+  if (!t) { res.status(400).json({ error: 'empty message' }); return; }
+  const r = await state.improveMessage(String(sessionId), auth.username, t);
+  if (!r) { res.sendStatus(404); return; }
+  res.json(r);
+}));
+app.post('/api/agents/:id/improve/apply', wrap(async (req, res, auth) => {
+  const { extension } = (req.body ?? {}) as { extension?: unknown };
+  const a = state.applyExtension(req.params.id, auth.tenantId, extension as never);
+  res.json({ id: a.id, version: a.spec.version });
+}));
+app.post('/api/agents/:id/improve/finish', wrap(async (req, res, auth) => {
+  const { sessionId } = (req.body ?? {}) as { sessionId?: string };
+  const r = state.finishImprove(String(sessionId), auth.username);
+  if (!r) { res.sendStatus(404); return; }
+  res.json(r);
+}));
+
 app.post('/api/agents/:id/apply', wrap(async (req, res, auth) => {
   const { suggestions } = (req.body ?? {}) as { suggestions?: TuningSuggestion[] };
   const a = state.applyImprovements(req.params.id, auth.tenantId, Array.isArray(suggestions) ? suggestions : []);

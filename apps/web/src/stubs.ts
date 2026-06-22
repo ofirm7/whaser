@@ -256,4 +256,14 @@ export class StubExtender implements Extender {
       newTools: [],
     };
   }
+
+  async improveInterview({ messages }: { spec: AgentSpec; messages: Array<{ role: 'user' | 'assistant'; content: string }> }): Promise<{ reply: string; proposeKind: ExtensionKind | 'none'; proposeInstruction: string }> {
+    const last = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+    const demo = ' (demo — connect an Anthropic key for a real improvement chat)';
+    if (/\b(add|create|skill|knowledge|info|workflow|sub-?agent|apply|do it|go ahead)\b/i.test(last) || /הוסף|תוסיף|בצע/.test(last)) {
+      const kind: ExtensionKind = /skill/i.test(last) ? 'skill' : (/workflow|sub-?agent/i.test(last) ? 'workflow' : 'context');
+      return { reply: `Got it — I'll prepare that as a ${kind} change for you to review and approve.` + demo, proposeKind: kind, proposeInstruction: last };
+    }
+    return { reply: 'Tell me what you would like to improve — for example: information it should know, a new skill, or a new task it should handle.' + demo, proposeKind: 'none', proposeInstruction: '' };
+  }
 }
