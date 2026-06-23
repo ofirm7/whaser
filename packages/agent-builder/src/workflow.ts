@@ -51,7 +51,9 @@ export function handoffMessage(spec: AgentSpec): string {
 export class WorkflowEngine {
   constructor(private readonly spec: AgentSpec, private readonly llm: WorkflowLlm) {}
 
-  async handle(messages: WorkflowRuntimeMessage[], media?: WorkflowMedia, executeToolCall?: ToolExecutor): Promise<WorkflowReply> {
+  /** `ambientTools` are always-available built-ins (e.g. chat_history) the host wires up — they bypass
+   *  the router's per-sub-agent tool allow-list, so every reply path can reach them. */
+  async handle(messages: WorkflowRuntimeMessage[], media?: WorkflowMedia, executeToolCall?: ToolExecutor, ambientTools?: AgentTool[]): Promise<WorkflowReply> {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
     let subAgent: SubAgent | null = null;
     let routedTo = 'default';
@@ -74,10 +76,15 @@ export class WorkflowEngine {
 
     // Give the model its declared tools (filtered to the routed sub-agent's allow-list) so it can
     // actually act, not just describe. The executor runs each call against a real platform backend.
+    // Ambient built-ins (e.g. chat_history) are appended unconditionally — they're not part of any
+    // sub-agent's allow-list but must stay reachable on every route.
     const tools = executeToolCall
-      ? subAgent && subAgent.tool_names.length
-        ? this.spec.tools.filter((t) => subAgent.tool_names.includes(t.name))
-        : this.spec.tools
+      ? [
+          ...(subAgent && subAgent.tool_names.length
+            ? this.spec.tools.filter((t) => subAgent.tool_names.includes(t.name))
+            : this.spec.tools),
+          ...(ambientTools ?? []),
+        ]
       : undefined;
     const r = await this.llm.reply({ systemPrompt: composeSystemPrompt(this.spec, subAgent), messages, media, tools, executeToolCall });
     return { text: r.text, routedTo, usage: r.usage };

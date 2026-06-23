@@ -202,6 +202,18 @@ export class BaileysChannel {
     return arr.slice(-limit).map((m) => ({ fromMe: m.fromMe, text: m.text }));
   }
 
+  /** On-demand history reader for the built-in `chat_history` agent tool: the chat's prior WhatsApp
+   *  messages (those that existed before the agent answered here), oldest→newest, optionally filtered
+   *  by a case-insensitive substring. Deliberately frugal — each text is truncated and the slice is
+   *  hard-capped — so an agent pulls only what it needs into context instead of carrying it every turn. */
+  searchHistory(jid: string, opts?: { query?: string; limit?: number }): { fromMe: boolean; text: string; ts: number }[] {
+    const all = [...(this.threadHistory.get(jid) ?? [])].sort((a, b) => a.ts - b.ts);
+    const q = (opts?.query ?? '').trim().toLowerCase();
+    const matched = q ? all.filter((m) => m.text.toLowerCase().includes(q)) : all;
+    const limit = Math.max(1, Math.min(40, Math.round(opts?.limit ?? 20) || 20));
+    return matched.slice(-limit).map((m) => ({ fromMe: m.fromMe, text: m.text.slice(0, 300), ts: m.ts }));
+  }
+
   getStatus(): { status: LinkStatus; qrDataUrl: string | null; me: string | null } {
     return { status: this.status, qrDataUrl: this.qrDataUrl, me: this.me };
   }

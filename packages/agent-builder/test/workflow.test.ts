@@ -1,8 +1,28 @@
 import { describe, it, expect } from 'vitest';
 import { WorkflowEngine, composeSystemPrompt } from '../src/workflow';
 import type { WorkflowLlm } from '../src/workflow';
-import type { AgentSpec } from '../src/schema';
+import type { AgentSpec, AgentTool } from '../src/schema';
 import { validSpec } from './fixtures';
+
+const ambientTool: AgentTool = {
+  name: 'chat_history',
+  description: 'Read earlier messages in this chat.',
+  parameters: [{ name: 'query', type: 'string', description: 'keyword', required: false }],
+  side_effecting: false,
+};
+
+/** An LLM seam that records the `tools` list handed to reply() (for ambient-tool assertions). */
+function llmRecordingTools(classify: string | null = null) {
+  const toolLists: Array<Array<{ name: string }> | undefined> = [];
+  const llm: WorkflowLlm = {
+    async classifyIntent() { return classify; },
+    async reply({ tools }) {
+      toolLists.push(tools?.map((t) => ({ name: t.name })));
+      return { text: 'ok', usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  };
+  return { llm, toolLists };
+}
 
 const routerSpec: AgentSpec = {
   ...validSpec,
@@ -66,6 +86,38 @@ describe('WorkflowEngine', () => {
     const r = await new WorkflowEngine(validSpec, h.llm).handle([{ role: 'user', content: 'hi' }]);
     expect(r.routedTo).toBe('default');
     expect(h.calls.classify).toBe(0);
+  });
+
+  it('appends ambient tools to the declared tool list when an executor is present', async () => {
+    const h = llmRecordingTools();
+    await new WorkflowEngine(validSpec, h.llm).handle(
+      [{ role: 'user', content: 'hi' }],
+      undefined,
+      async () => 'tool output',
+      [ambientTool],
+    );
+    const names = (h.toolLists[0] ?? []).map((t) => t.name);
+    expect(names).toContain('lookup_plan'); // the spec's declared tool
+    expect(names).toContain('chat_history'); // the ambient built-in
+  });
+
+  it('keeps ambient tools reachable on a routed sub-agent whose allow-list excludes them', async () => {
+    const h = llmRecordingTools('pricing'); // routes to "sales", tool_names: ['lookup_plan'] only
+    await new WorkflowEngine(routerSpec, h.llm).handle(
+      [{ role: 'user', content: 'how much is pro?' }],
+      undefined,
+      async () => 'tool output',
+      [ambientTool],
+    );
+    const names = (h.toolLists[0] ?? []).map((t) => t.name);
+    expect(names).toContain('lookup_plan'); // the sub-agent's one allowed tool
+    expect(names).toContain('chat_history'); // ambient — present despite not being in tool_names
+  });
+
+  it('offers no tools at all (ambient included) when there is no executor', async () => {
+    const h = llmRecordingTools();
+    await new WorkflowEngine(validSpec, h.llm).handle([{ role: 'user', content: 'hi' }], undefined, undefined, [ambientTool]);
+    expect(h.toolLists[0]).toBeUndefined();
   });
 
   it('composeSystemPrompt includes sub-agent specialty + tools', () => {

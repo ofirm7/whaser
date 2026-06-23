@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { AnthropicLike, AnthropicCreateParams, AnthropicMessage, AgentTool, ToolExecutor } from '../../../packages/agent-builder/src/index';
 import { toInputSchema } from '../../../packages/agent-builder/src/index';
 import type { WorkflowLlm, WorkflowRuntimeMessage, WorkflowMedia } from '../../../packages/agent-builder/src/index';
+import { CHAT_HISTORY_TOOL } from './workflowRuntime';
 
 interface RawMessage {
   // `id` is kept so tool_use blocks can be echoed back + matched to their tool_result.
@@ -81,12 +82,15 @@ export class AnthropicWorkflowLlm implements WorkflowLlm {
     });
 
     // Give the agent its declared tools as REAL callable tools + Anthropic's server-side web search,
-    // so it actually performs its capabilities instead of saying it lacks them.
+    // so it actually performs its capabilities instead of saying it lacks them. Web search stays tied
+    // to having DECLARED tools — the ambient chat_history built-in alone must not turn it on for an
+    // otherwise tool-less agent (keeps cost/scope unchanged for those).
     const useTools = !!(tools && tools.length && executeToolCall);
+    const hasDeclaredTool = !!tools?.some((t) => t.name !== CHAT_HISTORY_TOOL);
     const apiTools = useTools
       ? [
           ...tools!.map((t) => ({ name: t.name, description: t.description, input_schema: toInputSchema(t) })),
-          { type: 'web_search_20250305', name: 'web_search', max_uses: 4 },
+          ...(hasDeclaredTool ? [{ type: 'web_search_20250305', name: 'web_search', max_uses: 4 }] : []),
         ]
       : undefined;
 

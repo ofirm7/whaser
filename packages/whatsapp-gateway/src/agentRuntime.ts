@@ -19,6 +19,9 @@ export interface AgentRuntime {
     agentId: string;
     messages: RuntimeMessage[];
     conversationId?: string;
+    /** Opaque id of the chat this turn belongs to (the gateway's phone_number_id). Lets the runtime
+     *  give the agent on-demand access to that chat's prior history (the built-in chat_history tool). */
+    chatId?: string;
     /** Media for the current turn only (base64) — passed to the model, not stored in history. */
     currentTurnMedia?: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string };
   }): Promise<AgentReply>;

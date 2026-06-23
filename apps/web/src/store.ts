@@ -14,7 +14,7 @@ import type { WorkflowLlm } from '../../../packages/agent-builder/src/index';
 import { StubLlmClient, StubWorkflowLlm, StubTuner, StubExtender } from './stubs';
 import { makeAnthropicLike, AnthropicWorkflowLlm } from './anthropic';
 import { scanYad2New, formatListings, isYad2Context } from './yad2';
-import { WorkflowAgentRuntime } from './workflowRuntime';
+import { WorkflowAgentRuntime, CHAT_HISTORY_TOOL } from './workflowRuntime';
 import { BaileysChannel } from './baileys';
 import { TriggerScheduler } from './scheduler';
 import { loadAgents, saveAgents } from './persistence';
@@ -274,7 +274,7 @@ export class AppState {
     }
     // Steer each reply into the agent owner's personal writing style — per-tenant samples, resolved
     // per-call inside the runtime for the agent being replied to (race-free across tenants).
-    this.runtime = new WorkflowAgentRuntime(getSpec, workflowLlm, (agentId) => this.ownerStylePreambleForAgent(agentId), (agentId) => this.buildExecutor(agentId));
+    this.runtime = new WorkflowAgentRuntime(getSpec, workflowLlm, (agentId) => this.ownerStylePreambleForAgent(agentId), (agentId, chatId) => this.buildExecutor(agentId, { chatId }));
     this.handler = createAgentReplyHandler({
       resolver: this.resolver,
       runtime: this.runtime,
@@ -652,15 +652,49 @@ export class AppState {
     return { value: 15, unit: 'minute' };
   }
 
+  /** Decode the WhatsApp jid a turn happens in from the gateway's chatId. The personal channel keys a
+   *  chat as `${tenantId}::${jid}`; SIM numbers (and trigger fan-out) have no underlying jid → null. */
+  private jidFromChatId(tenantId: string, chatId?: string): string | null {
+    const prefix = `${tenantId}::`;
+    if (!chatId || !chatId.startsWith(prefix)) return null;
+    const jid = chatId.slice(prefix.length);
+    return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@g.us') ? jid : null;
+  }
+
+  /** Back the built-in chat_history tool: return a compact, capped, oldest→newest view of the chat's
+   *  earlier WhatsApp messages (optionally keyword-filtered). Token-frugal by design — the agent pulls
+   *  only what it asked for, instead of every turn carrying the full thread. */
+  private readChatHistory(tenantId: string, chatJid: string | null, input: Record<string, unknown>): string {
+    if (!chatJid) return 'No earlier WhatsApp history is available here (this chat is not a linked WhatsApp conversation).';
+    const ch = this.channels.get(tenantId);
+    if (!ch) return 'WhatsApp is not linked for this account, so there is no earlier chat history to read.';
+    const query = typeof input.query === 'string' && input.query.trim() ? input.query.trim() : undefined;
+    const limit = Number(input.limit);
+    const turns = ch.searchHistory(chatJid, { query, limit: Number.isFinite(limit) ? limit : undefined });
+    if (!turns.length) {
+      return query
+        ? `No earlier messages in this chat match "${query}".`
+        : 'No earlier WhatsApp history is stored for this chat yet.';
+    }
+    const lines = turns.map((t) => `[${new Date(t.ts || 0).toISOString().slice(0, 10)}] ${t.fromMe ? 'Owner' : 'Them'}: ${t.text}`);
+    return `Earlier WhatsApp messages in this chat (oldest first${query ? `, matching "${query}"` : ''}):\n${lines.join('\n')}`;
+  }
+
   /** Per-agent tool executor: maps each declared tool to a REAL platform backend so the agent
    *  actually performs its capabilities (web search, scheduling, WhatsApp notify, params) rather
    *  than saying it lacks them. Injected into the reply runtime's tool-use loop. */
-  private buildExecutor(agentId: string, opts?: { testMode?: boolean }): ((name: string, input: Record<string, unknown>) => Promise<string>) | undefined {
+  private buildExecutor(agentId: string, opts?: { testMode?: boolean; chatId?: string }): ((name: string, input: Record<string, unknown>) => Promise<string>) | undefined {
     const agent = this.agents.get(agentId);
     if (!agent) return undefined;
     const tenantId = agent.tenantId;
     const test = opts?.testMode === true; // a faithful "test run": real read tools, but no real sends/schedules/saves
+    // The WhatsApp jid of the chat this turn belongs to, for the built-in chat_history tool. The personal
+    // channel addresses a chat as `${tenantId}::${jid}`; a SIM/trigger context has no such jid.
+    const chatJid = this.jidFromChatId(tenantId, opts?.chatId);
     return async (name, input) => {
+      // Built-in: read this chat's earlier WhatsApp history on demand (works for EVERY agent, no spec
+      // change). Handled before the name-based routing below so it can't be mistaken for a declared tool.
+      if (name === CHAT_HISTORY_TOOL) return this.readChatHistory(tenantId, chatJid, input);
       const tool = agent.spec.tools.find((t) => t.name === name);
       const k = `${name} ${tool?.description ?? ''}`.toLowerCase();
       const has = (re: RegExp) => re.test(k);
@@ -1163,7 +1197,11 @@ export class AppState {
           // so memory ("does it remember earlier messages?") can actually be reproduced and verified.
           if (input.fresh === true) s.testConvo = [];
           s.testConvo.push({ role: 'user', content: String(input.message ?? '') });
-          const out = await this.runtime.complete({ agentId: s.agentId, messages: s.testConvo, executor: this.buildExecutor(s.agentId, { testMode: true }) });
+          // Test against the agent's first bound chat (if any) so a faithful run can reach that chat's
+          // real WhatsApp history via the built-in chat_history tool — letting the verify loop check
+          // "does it use earlier messages?" exactly as production would.
+          const testChatId = agent.listenChats[0] ? this.chatKey(s.tenantId, agent.listenChats[0].id) : undefined;
+          const out = await this.runtime.complete({ agentId: s.agentId, messages: s.testConvo, chatId: testChatId, executor: this.buildExecutor(s.agentId, { testMode: true, chatId: testChatId }) });
           this.recordSpend(s.tenantId, this.runtime.lastUsage, s.agentId, agent.spec.agent_name);
           s.testConvo.push({ role: 'assistant', content: out.text ?? '' });
           if (s.testConvo.length > 20) s.testConvo = s.testConvo.slice(-20);

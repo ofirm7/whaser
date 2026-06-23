@@ -51,6 +51,9 @@ export function createAgentReplyHandler(opts: AgentReplyHandlerOptions): Inbound
     const reply = await opts.runtime.complete({
       agentId: route.agentId,
       messages: [...history, userMessage],
+      // The phone_number_id identifies the chat — for the personal channel it encodes the WhatsApp jid,
+      // so the runtime can offer the agent on-demand access to this chat's earlier history.
+      chatId: msg.phoneNumberId,
       currentTurnMedia: msg.currentTurnMedia,
     });
 
