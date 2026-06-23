@@ -219,7 +219,10 @@ app.post('/api/wizard/publish', wrap(async (req, res, auth) => {
   }
   const agent = state.publish(session);
   state.bindChatsToAgent(agent.id, session.tenantId, session.selectedChats ?? []);
-  res.json({ agentId: agent.id, phoneNumberId: agent.phoneNumberId, listenChats: agent.listenChats, status: agent.status });
+  // Behind the scenes: if the design conversation asked for the owner's own style/voice, learn it
+  // from their WhatsApp writing and tune the new agent to match (best-effort; never blocks publish).
+  const ownerStyled = await state.applyOwnerStyleIfRequested(agent.id, session.tenantId, session.messages);
+  res.json({ agentId: agent.id, phoneNumberId: agent.phoneNumberId, listenChats: agent.listenChats, status: agent.status, ownerStyled });
 }));
 
 // --- Agents (tenant-scoped) ---
