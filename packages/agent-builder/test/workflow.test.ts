@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { WorkflowEngine, composeSystemPrompt } from '../src/workflow';
 import type { WorkflowLlm } from '../src/workflow';
 import type { AgentSpec, AgentTool } from '../src/schema';
+import { SILENCE_TOKEN } from '../src/materialize';
 import { validSpec } from './fixtures';
 
 const ambientTool: AgentTool = {
@@ -125,5 +126,16 @@ describe('WorkflowEngine', () => {
     expect(s).toContain('Sales');
     expect(s).toContain('book demos');
     expect(s).toContain('lookup_plan');
+  });
+
+  it('strips the silence sentinel to an empty (un-sent) reply — reply-on-name rule', async () => {
+    const make = (text: string): WorkflowLlm => ({
+      async classifyIntent() { return null; },
+      async reply() { return { text, usage: { inputTokens: 1, outputTokens: 1 } }; },
+    });
+    const run = (text: string) => new WorkflowEngine(validSpec, make(text)).handle([{ role: 'user', content: 'hi' }]);
+    expect((await run(SILENCE_TOKEN)).text).toBe(''); // pure sentinel -> nothing sent
+    expect((await run(`  ${SILENCE_TOKEN}  `)).text).toBe(''); // sentinel + whitespace -> still nothing
+    expect((await run('hello there')).text).toBe('hello there'); // a normal reply is untouched
   });
 });
