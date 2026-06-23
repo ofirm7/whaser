@@ -30,16 +30,67 @@ const credsFile = fileURLToPath(new URL('../.data/seed-credentials.txt', import.
 const hashSeed = (password: string, salt: string): string => scryptSync(password, salt, 64).toString('hex');
 const hashPw = async (password: string, salt: string): Promise<string> => (await scryptAsync(password, salt, 64)).toString('hex');
 
-function load(): DirectoryUser[] {
+/** Preserve an unreadable users.json before we refuse to start, so accounts can be recovered by hand. */
+function backupCorrupt(raw: string): void {
   try {
-    if (existsSync(file)) {
-      const d = JSON.parse(readFileSync(file, 'utf8'));
-      if (Array.isArray(d)) return d as DirectoryUser[];
-    }
+    const bak = `${file}.corrupt-${Date.now()}`;
+    writeFileSync(bak, raw);
+    console.error(`[directory] users.json was unreadable; preserved a copy at ${bak}`);
   } catch {
     /* ignore */
   }
-  return [];
+}
+
+/**
+ * Load the user directory. Hardened so a malformed file can NEVER silently become "no users" — which
+ * would let the demo-seed step overwrite (and permanently delete) real accounts:
+ *  - missing/empty file -> [] (first run; safe to seed).
+ *  - valid array -> use it.
+ *  - object-of-records (a legacy/buggy `{"0":{…}}` shape) -> recover via Object.values instead of wiping.
+ *  - unparseable / wrong-shape / zero valid records from a non-empty file -> back up + THROW (refuse to
+ *    start) so the existing file is never overwritten with demo-only data.
+ */
+function load(): DirectoryUser[] {
+  if (!existsSync(file)) return [];
+  let raw = '';
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch {
+    return []; // unreadable on disk (e.g. perms) — treat as first run rather than crash; nothing to overwrite yet
+  }
+  if (!raw.trim()) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    backupCorrupt(raw);
+    throw new Error('users.json is not valid JSON — refusing to start so existing accounts are not overwritten (a copy was preserved).');
+  }
+
+  const records = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object'
+      ? Object.values(parsed as Record<string, unknown>) // recover a `{"0":{…},"1":{…}}` shape rather than wiping
+      : null;
+  if (!records) {
+    backupCorrupt(raw);
+    throw new Error('users.json has an unexpected shape — refusing to start so existing accounts are not overwritten (a copy was preserved).');
+  }
+
+  const isUser = (u: unknown): u is DirectoryUser =>
+    !!u && typeof u === 'object' &&
+    typeof (u as DirectoryUser).username === 'string' &&
+    typeof (u as DirectoryUser).hash === 'string' &&
+    typeof (u as DirectoryUser).salt === 'string';
+  const valid = records.filter(isUser);
+  if (records.length > 0 && valid.length === 0) {
+    backupCorrupt(raw);
+    throw new Error('users.json contained no valid user records — refusing to start so accounts are not lost (a copy was preserved).');
+  }
+  if (valid.length !== records.length) backupCorrupt(raw); // some odd records dropped — keep the original around
+
+  return valid;
 }
 
 function saveUsers(): void {
