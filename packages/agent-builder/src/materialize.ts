@@ -1,5 +1,11 @@
 import type { AgentSpec, AgentTool } from './schema';
 
+/**
+ * Sentinel a reply may emit to mean "send nothing at all". The WorkflowEngine strips it to an empty
+ * reply, which every send path already treats as "no message". Powers the reply-on-name rule below.
+ */
+export const SILENCE_TOKEN = '<<no-reply>>';
+
 /** Derive a JSON-Schema input_schema (closed) from a tool's closed parameter list. */
 export function toInputSchema(tool: AgentTool): Record<string, unknown> {
   const properties: Record<string, unknown> = {};
@@ -44,6 +50,16 @@ export function renderInstructions(spec: AgentSpec): string {
       'computer words; if something technical is truly unavoidable, explain it in one very simple sentence. ' +
       'When you guide the user to do something, give small numbered steps a beginner can follow, one at a time. ' +
       'Never assume the user knows technical concepts.',
+  );
+  // Global reply-on-name rule (applies to EVERY agent): a user can mute the bot unless explicitly
+  // called by name. Opt-in — dormant until someone in the chat actually asks for it.
+  sections.push(
+    `Reply-on-name rule: if anyone in this chat asks or tells you to only answer / reply / talk when you are ` +
+      `called by your name (e.g. "only respond when I say your name", "don't reply unless I mention you", "answer ` +
+      `only when you are called") — obey it strictly for the rest of the conversation. From then on, reply ONLY ` +
+      `when your name ("${spec.agent_name}") clearly appears in the most recent message; for every other message ` +
+      `send NOTHING at all. To stay silent, reply with exactly ${SILENCE_TOKEN} and nothing else — do not greet, ` +
+      `apologize, or explain, just ${SILENCE_TOKEN}. Resume replying normally on any message that mentions your name.`,
   );
   sections.push(`Primary goal: ${spec.goal}`);
   if (spec.in_scope_topics.length) sections.push(`In scope: ${spec.in_scope_topics.join('; ')}.`);

@@ -1,5 +1,5 @@
 import type { AgentSpec, SubAgent, AgentTool } from './schema';
-import { renderInstructions } from './materialize';
+import { renderInstructions, SILENCE_TOKEN } from './materialize';
 
 export interface WorkflowRuntimeMessage {
   role: 'user' | 'assistant';
@@ -87,6 +87,9 @@ export class WorkflowEngine {
         ]
       : undefined;
     const r = await this.llm.reply({ systemPrompt: composeSystemPrompt(this.spec, subAgent), messages, media, tools, executeToolCall });
-    return { text: r.text, routedTo, usage: r.usage };
+    // Reply-on-name rule: a reply containing the silence sentinel means "send nothing" — strip it so the
+    // text goes empty, which every send path treats as no message.
+    const text = r.text.includes(SILENCE_TOKEN) ? r.text.split(SILENCE_TOKEN).join('').trim() : r.text;
+    return { text, routedTo, usage: r.usage };
   }
 }
