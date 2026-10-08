@@ -1125,6 +1125,7 @@ async function buildGoogleSettings(container, onChange){
       : s.source==='server' ? `<span class="muted">${t("Using this server's default Google client. Save your own to use it instead.")}</span>`
       : `<span class="muted">${t('No Google OAuth client yet.')}</span>`;
     container.innerHTML=`<h2 style="margin-bottom:6px">🔗 Google</h2>
+      ${s.problem?`<div class="card" style="border-color:var(--danger);margin:6px 0 10px;padding:10px 12px"><span class="err">⚠ ${esc(s.problem)}</span></div>`:''}
       <div class="muted">${t('Agents use your Gmail, Google Calendar and Google Drive through your own Google OAuth client. Create one once, then paste its details here.')}</div>
       <ol class="muted" style="margin:8px 0;padding-inline-start:22px;line-height:1.6">
         <li>${tf('In {0}, create a project and enable the Gmail API, Google Calendar API and Google Drive API.', consoleLink)}</li>
