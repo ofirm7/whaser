@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { authenticate, registerUser, tenantName } from './directory';
 import { AppState } from './store';
-import { callbackPage, suggestConnections } from './google';
+import { callbackPage, redirectUriProblem, suggestConnections } from './google';
 import type { TuningSuggestion } from '../../../packages/agent-builder/src/index';
 import { createWebhookRouter } from '../../../packages/whatsapp-gateway/src/express';
 
@@ -344,6 +344,27 @@ app.get('/api/google/callback', async (req: Request, res: Response) => {
 app.post('/api/google/disconnect', wrap(async (_req, res, auth) => {
   await state.google.disconnect(auth.tenantId);
   res.json(state.google.status(auth.tenantId));
+}));
+
+// --- Settings: the workspace's own Google OAuth client. The secret is write-only (never sent back). ---
+const googleSettings = (req: Request, tenantId: string) => {
+  const redirectUri = googleRedirectUri(req);
+  return { ...state.google.clientSettings(tenantId), redirectUri, redirectUriProblem: redirectUriProblem(redirectUri), status: state.google.status(tenantId) };
+};
+
+app.get('/api/settings/google', wrap(async (req, res, auth) => {
+  res.json(googleSettings(req, auth.tenantId));
+}));
+
+app.put('/api/settings/google', wrap(async (req, res, auth) => {
+  const { clientId, clientSecret } = (req.body ?? {}) as { clientId?: unknown; clientSecret?: unknown };
+  const { verified } = await state.google.setClient(auth.tenantId, auth.username, { clientId, clientSecret }, googleRedirectUri(req));
+  res.json({ ...googleSettings(req, auth.tenantId), verified });
+}));
+
+app.delete('/api/settings/google', wrap(async (req, res, auth) => {
+  await state.google.removeClient(auth.tenantId);
+  res.json(googleSettings(req, auth.tenantId));
 }));
 
 // --- QR-linked personal WhatsApp (POC) — each user links their OWN account (tenant-scoped) ---

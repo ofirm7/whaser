@@ -298,12 +298,43 @@ const I18N = { he: {
     "Disconnect Google": "ניתוק Google",
     "Disconnect Google?": "לנתק את Google?",
     "Every agent in this workspace loses access to your Gmail, Calendar and Drive until you connect again.": "כל הסוכנים בסביבת העבודה הזו יאבדו את הגישה ל-Gmail, ליומן ול-Drive שלכם עד שתתחברו שוב.",
-    "Google isn't set up on this server yet — the admin needs to add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (see apps/web/README.md).": "Google עדיין לא הוגדר בשרת הזה — מנהל המערכת צריך להוסיף GOOGLE_CLIENT_ID ו-GOOGLE_CLIENT_SECRET (ראו apps/web/README.md).",
+    "To use Google, first add your Google OAuth client in Settings.": "כדי להשתמש ב-Google, הוסיפו קודם את לקוח ה-OAuth של Google שלכם בהגדרות.",
+    "⚙️ Open Google settings": "⚙️ פתיחת הגדרות Google",
     "⚠️ Anyone who can message this agent can ask it to use what you connect here — for example to read your email or, with Read & write, to send email as you. Connect only what this agent needs.": "⚠️ כל מי שיכול לשלוח הודעה לסוכן יכול לבקש ממנו להשתמש במה שתחברו כאן — למשל לקרוא את המיילים שלכם או, עם קריאה וכתיבה, לשלוח מיילים בשמכם. חברו רק את מה שהסוכן הזה צריך.",
     "Google:": "Google:",
     "no Google connections": "אין חיבורי Google",
     "Save connections": "שמירת החיבורים",
-    "⚠ Google isn't connected with this access yet — open 🔗 Google connections.": "⚠ Google עדיין לא מחובר עם הגישה הזו — פתחו את 🔗 חיבורי Google."
+    "⚠ Google isn't connected with this access yet — open 🔗 Google connections.": "⚠ Google עדיין לא מחובר עם הגישה הזו — פתחו את 🔗 חיבורי Google.",
+    "⚙️ Settings": "⚙️ הגדרות",
+    "Settings": "הגדרות",
+    "Settings for your workspace ({0}).": "הגדרות סביבת העבודה שלכם ({0}).",
+    "Agents use your Gmail, Google Calendar and Google Drive through your own Google OAuth client. Create one once, then paste its details here.": "הסוכנים משתמשים ב-Gmail, ביומן Google וב-Google Drive שלכם דרך לקוח OAuth של Google משלכם. צרו אחד פעם אחת, ואז הדביקו כאן את הפרטים שלו.",
+    "In {0}, create a project and enable the Gmail API, Google Calendar API and Google Drive API.": "ב-{0}, צרו פרויקט והפעילו את Gmail API, ‏Google Calendar API ו-Google Drive API.",
+    "Set up the OAuth consent screen (while it's in Testing, add your Google account as a test user).": "הגדירו את מסך ההסכמה של OAuth (כל עוד הוא במצב Testing, הוסיפו את חשבון ה-Google שלכם כמשתמש בדיקה).",
+    "Create an OAuth client ID of type \"Web application\" and add this Authorized redirect URI:": "צרו מזהה לקוח OAuth מסוג \"Web application\" והוסיפו את כתובת ה-Redirect המורשית הזו:",
+    "Paste the client ID and client secret below and save.": "הדביקו למטה את מזהה הלקוח ואת הסוד שלו ושמרו.",
+    "Copy": "העתקה",
+    "Copied ✓": "הועתק ✓",
+    "⚠️ Google won't accept an IP address here. Open Whaser through a domain with https, or through localhost (e.g. an SSH tunnel), and this address will update.": "⚠️ Google לא מקבל כאן כתובת IP. פתחו את Whaser דרך דומיין עם https, או דרך localhost (למשל במנהרת SSH), והכתובת הזו תתעדכן.",
+    "⚠️ Google only accepts https here (or http on localhost). Open Whaser through https or localhost, and this address will update.": "⚠️ Google מקבל כאן רק https (או http ב-localhost). פתחו את Whaser דרך https או localhost, והכתובת הזו תתעדכן.",
+    "Client ID": "מזהה לקוח (Client ID)",
+    "Client secret": "סוד לקוח (Client secret)",
+    "Saved (…{0}) — leave empty to keep it": "נשמר (…{0}) — השאירו ריק כדי לשמור אותו",
+    "Save": "שמירה",
+    "Remove": "הסרה",
+    "Saving…": "שומר…",
+    "✓ Saved — Google recognized this client.": "✓ נשמר — Google זיהה את הלקוח הזה.",
+    "✓ Saved (Google couldn't be reached to check it right now).": "✓ נשמר (לא ניתן היה לבדוק מול Google כרגע).",
+    "✓ Your Google OAuth client is saved (by {0}).": "✓ לקוח ה-OAuth של Google שלכם שמור (על ידי {0}).",
+    "Using this server's default Google client. Save your own to use it instead.": "בשימוש: לקוח ה-Google ברירת המחדל של השרת. שמרו לקוח משלכם כדי להשתמש בו במקום.",
+    "No Google OAuth client yet.": "עדיין אין לקוח OAuth של Google.",
+    "Google account: {0}": "חשבון Google: {0}",
+    "No Google account connected yet — connect one from an agent's 🔗 Google connections.": "עדיין לא חובר חשבון Google — חברו אחד מ-🔗 חיבורי Google של סוכן.",
+    "Switch Google client?": "להחליף את לקוח ה-Google?",
+    "The connected Google account ({0}) will be disconnected, because its access belongs to the old client. You can connect it again afterwards.": "חשבון ה-Google המחובר ({0}) ינותק, כי הגישה שלו שייכת ללקוח הקודם. אפשר לחבר אותו שוב אחר כך.",
+    "Remove Google client?": "להסיר את לקוח ה-Google?",
+    "Agents lose access to Gmail, Calendar and Drive until a Google client is saved and the account is connected again.": "הסוכנים יאבדו גישה ל-Gmail, ליומן ול-Drive עד שיישמר לקוח Google והחשבון יחובר שוב.",
+    "Close": "סגירה"
   } };
 let lang = localStorage.getItem('whaser_lang') || 'en';
 function t(s){ const d = I18N[lang]; return (d && d[s] != null) ? d[s] : s; }
@@ -440,12 +471,13 @@ function render(){
   else if (view === 'create') CreateView(wrap);
   else if (view === 'whatsapp') WhatsAppView(wrap);
   else if (view === 'activity') ActivityView(wrap);
+  else if (view === 'settings') SettingsView(wrap);
   else if (view && view.startsWith('agent:')) AgentDetailView(wrap, view.slice(6));
 }
 
 function Header(){
   const h = $('<header></header>');
-  const items = [['agents',t('Agents')],['catalog',t('Catalog')],['create',t('+ Create agent')],['whatsapp',t('WhatsApp')],['activity',t('Activity')]];
+  const items = [['agents',t('Agents')],['catalog',t('Catalog')],['create',t('+ Create agent')],['whatsapp',t('WhatsApp')],['activity',t('Activity')],['settings',t('⚙️ Settings')]];
   const cur = items.find(i=>i[0]===view) || ((view&&view.startsWith('agent:')) ? items[0] : items[0]);
   h.innerHTML = `<span class="logo">Whaser</span>
     <div class="menu">
@@ -1010,10 +1042,7 @@ function buildConnectionsPicker(container, preset, opts){
   const missing=()=>Object.entries(sel).filter(([k,acc])=>!(st&&st.connected&&googleCovers(st.granted,k,acc)));
   const onMsg=(e)=>{ if(e.origin===location.origin && e.data && e.data.type==='whaser-google') check(); };
   const stopWaiting=()=>{ waiting=false; blockedUrl=null; if(poll){ clearInterval(poll); poll=null; } window.removeEventListener('message', onMsg); };
-  async function load(){
-    try{ st=await api('/api/google/status'); }catch{ st=st||{ configured:false, connected:false, granted:{} }; }
-    if(!st.configured) for(const k in sel) delete sel[k]; // nothing can be connected on this server — never save a dead connection
-  }
+  async function load(){ try{ st=await api('/api/google/status'); }catch{ st=st||{ configured:false, connected:false, granted:{} }; } }
   async function check(){
     if(!alive()){ stopWaiting(); return; }
     await load();
@@ -1043,7 +1072,12 @@ function buildConnectionsPicker(container, preset, opts){
       <div class="muted" style="margin:4px 0 8px">${t('Let this agent use your Gmail, Google Calendar and Google Drive — pick Read only or Read & write for each.')}
       ${opts&&opts.optional?' '+t("Optional — you can also add these later from the agent's page."):''}</div>`;
     if(!st){ box.appendChild($(`<div class="muted">${t('Loading…')}</div>`)); return; }
-    if(!st.configured){ box.appendChild($(`<div class="muted">${t("Google isn't set up on this server yet — the admin needs to add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (see apps/web/README.md).")}</div>`)); return; }
+    if(!st.configured){
+      box.appendChild($(`<div class="muted">${t('To use Google, first add your Google OAuth client in Settings.')}</div>`));
+      const sb=$(`<button class="primary" style="margin-top:8px">${t('⚙️ Open Google settings')}</button>`);
+      sb.onclick=()=>openGoogleSettingsDialog(async()=>{ await load(); paint(); }); // a dialog, so a wizard in progress isn't lost
+      box.appendChild(sb); return;
+    }
     if(suggested) box.appendChild($(`<div class="muted" style="margin-bottom:6px">${t('Pre-selected from your conversation — change anything you like.')}</div>`));
     for(const s of GOOGLE_SERVICES){
       const on=!!sel[s.k], acc=sel[s.k]||'read_write';
@@ -1073,7 +1107,83 @@ function buildConnectionsPicker(container, preset, opts){
     if(Object.keys(sel).length) box.appendChild($(`<div class="card" style="border-color:var(--danger);margin:10px 0 0;padding:10px 12px;font-size:13.5px">${t('⚠️ Anyone who can message this agent can ask it to use what you connect here — for example to read your email or, with Read & write, to send email as you. Connect only what this agent needs.')}</div>`));
   }
   paint(); load().then(paint);
-  return { get: ()=>({ ...sel }) };
+  // Nothing can be connected without an OAuth client — never save a dead connection.
+  return { get: ()=>(st && !st.configured ? {} : { ...sel }) };
+}
+
+// The workspace's own Google OAuth client (Settings page, and the dialog the connections picker opens).
+// The secret is write-only: the server never sends it back, only its last 4 characters.
+async function buildGoogleSettings(container, onChange){
+  container.innerHTML=`<span class="muted">${t('Loading…')}</span>`;
+  let s; try{ s=await api('/api/settings/google'); }catch(e){ container.innerHTML=`<div class="err">${esc(e.message)}</div>`; return; }
+  const consoleLink=`<a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>`;
+  function paint(note){
+    const problem = s.redirectUriProblem==='ip'
+      ? t("⚠️ Google won't accept an IP address here. Open Whaser through a domain with https, or through localhost (e.g. an SSH tunnel), and this address will update.")
+      : s.redirectUriProblem==='http' ? t('⚠️ Google only accepts https here (or http on localhost). Open Whaser through https or localhost, and this address will update.') : '';
+    const state = s.source==='workspace' ? `<span class="ok">${esc(tf('✓ Your Google OAuth client is saved (by {0}).', s.updatedBy||''))}</span>`
+      : s.source==='server' ? `<span class="muted">${t("Using this server's default Google client. Save your own to use it instead.")}</span>`
+      : `<span class="muted">${t('No Google OAuth client yet.')}</span>`;
+    container.innerHTML=`<h2 style="margin-bottom:6px">🔗 Google</h2>
+      <div class="muted">${t('Agents use your Gmail, Google Calendar and Google Drive through your own Google OAuth client. Create one once, then paste its details here.')}</div>
+      <ol class="muted" style="margin:8px 0;padding-inline-start:22px;line-height:1.6">
+        <li>${tf('In {0}, create a project and enable the Gmail API, Google Calendar API and Google Drive API.', consoleLink)}</li>
+        <li>${t("Set up the OAuth consent screen (while it's in Testing, add your Google account as a test user).")}</li>
+        <li>${t('Create an OAuth client ID of type "Web application" and add this Authorized redirect URI:')}</li>
+      </ol>
+      <div class="row"><input class="g-uri" readonly dir="ltr"/><button class="g-copy">${t('Copy')}</button></div>
+      ${problem?`<div class="card" style="border-color:var(--danger);margin:8px 0 0;padding:10px 12px;font-size:13.5px">${problem}</div>`:''}
+      <ol class="muted" start="4" style="margin:8px 0 0;padding-inline-start:22px"><li>${t('Paste the client ID and client secret below and save.')}</li></ol>
+      <label>${t('Client ID')}</label><input class="g-id" dir="ltr" autocomplete="off" placeholder="1234-abc.apps.googleusercontent.com"/>
+      <label>${t('Client secret')}</label><input class="g-secret" type="password" dir="ltr" autocomplete="new-password"/>
+      <div class="row" style="margin-top:12px;flex-wrap:wrap"><button class="primary g-save">${t('Save')}</button>
+        ${s.source==='workspace'?`<button class="ghost g-remove">${t('Remove')}</button>`:''}<span class="g-msg" style="font-size:13.5px">${note||''}</span></div>
+      <div style="margin-top:10px">${state}</div>
+      <div class="muted" style="margin-top:6px">${s.status.connected?esc(tf('Google account: {0}', s.status.email||s.status.connectedBy||'Google')):t("No Google account connected yet — connect one from an agent's 🔗 Google connections.")}</div>`;
+    const q=(c)=>container.querySelector(c);
+    q('.g-uri').value=s.redirectUri; q('.g-id').value=s.clientId;
+    q('.g-secret').placeholder = s.secretHint ? tf('Saved (…{0}) — leave empty to keep it', s.secretHint) : 'GOCSPX-…';
+    q('.g-copy').onclick=async()=>{ const u=q('.g-uri');
+      try{ await navigator.clipboard.writeText(u.value); }catch{ u.select(); document.execCommand('copy'); } // clipboard API needs https/localhost
+      q('.g-copy').textContent=t('Copied ✓'); };
+    const msg=(html)=>{ q('.g-msg').innerHTML=html; };
+    // A different client unlinks the connected account (its tokens belong to the old client) — confirm first.
+    const confirmSwitch=async(title, message)=> !s.status.connected || await confirmDialog({ title, message, confirmLabel:t('Confirm'), danger:true });
+    q('.g-save').onclick=async()=>{ const b=q('.g-save'); const clientId=q('.g-id').value.trim(), clientSecret=q('.g-secret').value.trim();
+      const switching=!(s.source==='workspace' && clientId===s.clientId); // a new secret for the same client keeps the account linked
+      if (switching && !(await confirmSwitch(t('Switch Google client?'), tf('The connected Google account ({0}) will be disconnected, because its access belongs to the old client. You can connect it again afterwards.', s.status.email||'Google')))) return;
+      b.disabled=true; msg(`<span class="muted">${t('Saving…')}</span>`);
+      try{ const r=await api('/api/settings/google','PUT',{ clientId, clientSecret }); s=r;
+        paint(`<span class="ok">${r.verified?t('✓ Saved — Google recognized this client.'):t("✓ Saved (Google couldn't be reached to check it right now).")}</span>`); onChange&&onChange(); }
+      catch(e){ msg(`<span class="err">${esc(e.message)}</span>`); b.disabled=false; } };
+    const rm=q('.g-remove');
+    if(rm) rm.onclick=async()=>{ const ok=await confirmDialog({ title:t('Remove Google client?'), message:t('Agents lose access to Gmail, Calendar and Drive until a Google client is saved and the account is connected again.'), confirmLabel:t('Remove'), danger:true });
+      if(!ok) return; rm.disabled=true;
+      try{ s=await api('/api/settings/google','DELETE'); paint(); onChange&&onChange(); }catch(e){ msg(`<span class="err">${esc(e.message)}</span>`); rm.disabled=false; } };
+  }
+  paint();
+}
+
+function openGoogleSettingsDialog(onChange){
+  const backdrop=$('<div class="modal-backdrop"></div>');
+  const card=$('<div class="card modal wide" role="dialog" aria-modal="true"></div>');
+  const body=$('<div></div>'); card.appendChild(body);
+  const foot=$(`<div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost">${t('Close')}</button></div>`); card.appendChild(foot);
+  let done=false;
+  const close=()=>{ if(done) return; done=true; _openDialogs.delete(close); document.removeEventListener('keydown', onKey); backdrop.remove(); };
+  const onKey=(e)=>{ if(e.key==='Escape' && !document.querySelector('.modal-backdrop ~ .modal-backdrop')) close(); };
+  foot.querySelector('button').onclick=close;
+  backdrop.onclick=(e)=>{ if(e.target===backdrop) close(); };
+  document.addEventListener('keydown', onKey); _openDialogs.add(close);
+  backdrop.appendChild(card); document.body.appendChild(backdrop);
+  buildGoogleSettings(body, ()=>{ onChange&&onChange(); });
+}
+
+async function SettingsView(wrap){
+  wrap.appendChild($(`<h1>${t('Settings')}</h1>`));
+  wrap.appendChild($(`<div class="muted" style="margin-bottom:12px">${esc(tf('Settings for your workspace ({0}).', user.tenantName||''))}</div>`));
+  const card=$('<div class="card"></div>'); wrap.appendChild(card);
+  buildGoogleSettings(card);
 }
 
 async function CreateView(wrap){
