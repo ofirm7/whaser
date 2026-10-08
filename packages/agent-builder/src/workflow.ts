@@ -77,12 +77,15 @@ export class WorkflowEngine {
     // Give the model its declared tools (filtered to the routed sub-agent's allow-list) so it can
     // actually act, not just describe. The executor runs each call against a real platform backend.
     // Ambient built-ins (e.g. chat_history) are appended unconditionally — they're not part of any
-    // sub-agent's allow-list but must stay reachable on every route.
+    // sub-agent's allow-list but must stay reachable on every route. A declared tool with a built-in's
+    // name is dropped (the built-in is the real backend, and tool names must be unique per request).
+    const ambientNames = new Set((ambientTools ?? []).map((t) => t.name));
     const tools = executeToolCall
       ? [
           ...(subAgent && subAgent.tool_names.length
             ? this.spec.tools.filter((t) => subAgent.tool_names.includes(t.name))
-            : this.spec.tools),
+            : this.spec.tools
+          ).filter((t) => !ambientNames.has(t.name)),
           ...(ambientTools ?? []),
         ]
       : undefined;

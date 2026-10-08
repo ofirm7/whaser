@@ -15,6 +15,8 @@ import { StubLlmClient, StubWorkflowLlm, StubTuner, StubExtender } from './stubs
 import { makeAnthropicLike, AnthropicWorkflowLlm } from './anthropic';
 import { scanYad2New, formatListings, isYad2Context } from './yad2';
 import { WorkflowAgentRuntime, CHAT_HISTORY_TOOL } from './workflowRuntime';
+import { GoogleAccounts, googleToolsFor, isGoogleTool, runGoogleTool, connectionsPreamble, describeConnections, normalizeConnections } from './google';
+import type { AgentConnections } from './google';
 import { BaileysChannel } from './baileys';
 import { TriggerScheduler } from './scheduler';
 import { loadAgents, saveAgents } from './persistence';
@@ -107,6 +109,9 @@ export interface StoredAgent {
   answerSelf?: boolean;
   /** Scheduled actions that fire automatically on a cadence. Absent until the owner adds one. */
   triggers?: AgentTrigger[];
+  /** Google services (Gmail / Calendar / Drive) this agent may use through its workspace's linked
+   *  Google account, each 'read' or 'read_write'. Absent = none. */
+  connections?: AgentConnections;
   createdAt: number;
   lastActivityAt: number | null;
 }
@@ -248,6 +253,8 @@ export class AppState {
   private readonly transcripts = new Map<string, TranscriptTurn[]>();
   private readonly activity: ActivityEvent[] = [];
   private seq = 0;
+  /** Each workspace's linked Google account (OAuth tokens), backing agents' Google connections. */
+  readonly google = new GoogleAccounts();
 
   constructor() {
     this.loadBalances();
@@ -273,8 +280,15 @@ export class AppState {
       this.extender = new StubExtender();
     }
     // Steer each reply into the agent owner's personal writing style — per-tenant samples, resolved
-    // per-call inside the runtime for the agent being replied to (race-free across tenants).
-    this.runtime = new WorkflowAgentRuntime(getSpec, workflowLlm, (agentId) => this.ownerStylePreambleForAgent(agentId), (agentId, chatId) => this.buildExecutor(agentId, { chatId }));
+    // per-call inside the runtime for the agent being replied to (race-free across tenants) — and give
+    // agents with Google connections their Gmail/Calendar/Drive tools (+ how to use them safely).
+    this.runtime = new WorkflowAgentRuntime(
+      getSpec,
+      workflowLlm,
+      (agentId) => [this.ownerStylePreambleForAgent(agentId), connectionsPreamble(this.agents.get(agentId)?.connections)].filter(Boolean).join('\n\n'),
+      (agentId, chatId) => this.buildExecutor(agentId, { chatId }),
+      (agentId) => googleToolsFor(this.agents.get(agentId)?.connections),
+    );
     this.handler = createAgentReplyHandler({
       resolver: this.resolver,
       runtime: this.runtime,
@@ -695,6 +709,9 @@ export class AppState {
       // Built-in: read this chat's earlier WhatsApp history on demand (works for EVERY agent, no spec
       // change). Handled before the name-based routing below so it can't be mistaken for a declared tool.
       if (name === CHAT_HISTORY_TOOL) return this.readChatHistory(tenantId, chatJid, input);
+      // Built-in: the agent's Google connections (Gmail / Calendar / Drive). A test run reads for real
+      // but only describes writes.
+      if (isGoogleTool(name)) return runGoogleTool(this.google, { tenantId, connections: agent.connections, testMode: test }, name, input);
       const tool = agent.spec.tools.find((t) => t.name === name);
       const k = `${name} ${tool?.description ?? ''}`.toLowerCase();
       const has = (re: RegExp) => re.test(k);
@@ -993,10 +1010,12 @@ export class AppState {
     return a && a.tenantId === tenantId ? a : undefined;
   }
 
-  publish(session: WizardSession): StoredAgent {
+  /** Publish the designed agent, with any Google connections picked in the publish step. */
+  publish(session: WizardSession, connections?: unknown): StoredAgent {
     const result = session.finalizeResult;
     if (!result || !result.publishable) throw new Error('spec is not publishable');
     const spec = result.spec as AgentSpec;
+    const conns = normalizeConnections(connections);
     const agent: StoredAgent = {
       id: this.id('agent'),
       tenantId: session.tenantId,
@@ -1005,6 +1024,7 @@ export class AppState {
       status: 'live',
       phoneNumberId: this.nextSimNumber(),
       listenChats: [],
+      ...(Object.keys(conns).length ? { connections: conns } : {}),
       createdAt: this.now(),
       lastActivityAt: null,
     };
@@ -1096,6 +1116,17 @@ export class AppState {
     const a = this.getAgent(id, tenantId);
     if (!a) return undefined;
     a.status = status;
+    this.persist();
+    return a;
+  }
+
+  /** Replace which Google services (and at what access) an agent may use. */
+  setConnections(id: string, tenantId: string, connections: unknown): StoredAgent | undefined {
+    const a = this.getAgent(id, tenantId);
+    if (!a) return undefined;
+    const conns = normalizeConnections(connections);
+    if (Object.keys(conns).length) a.connections = conns;
+    else delete a.connections;
     this.persist();
     return a;
   }
@@ -1247,6 +1278,7 @@ export class AppState {
         'than pretending. Consecutive test_agent calls continue ONE conversation, so to check whether the agent',
         'remembers earlier messages, send a few in a row (it now carries the existing chat history) and use',
         "fresh=true to start over. Be concise and non-technical. Only apply changes the owner agreed to. Reply in the owner's language.",
+        `Google connections (managed by the owner on the agent page under "🔗 Google connections", not via apply_improvement): ${describeConnections(agent.connections) || 'none'}.`,
       ].join(' ') + `\n\nCurrent agent configuration (AgentSpec):\n${JSON.stringify(agent.spec)}`;
       const r = await this.improveLlm.improveChat({ systemPrompt: sys, messages: s.messages, executeToolCall: exec });
       s.messages.push({ role: 'assistant', content: r.text });

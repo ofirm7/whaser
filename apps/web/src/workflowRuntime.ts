@@ -1,6 +1,7 @@
 import { WorkflowEngine } from '../../../packages/agent-builder/src/index';
 import type { WorkflowLlm, AgentSpec, AgentTool } from '../../../packages/agent-builder/src/index';
 import type { AgentRuntime, AgentReply, RuntimeMessage } from '../../../packages/whatsapp-gateway/src/agentRuntime';
+import { isGoogleTool } from './google';
 
 /** Reserved name of the built-in, always-available tool that lets ANY agent read the chat's prior
  *  WhatsApp history on demand (the messages that existed before it was created/deployed). Handled by
@@ -24,6 +25,12 @@ export const chatHistoryTool: AgentTool = {
   side_effecting: false,
 };
 
+/** Built-in tools the platform injects (chat_history, the Google connection tools) — as opposed to the
+ *  tools an agent's spec declares. */
+export function isBuiltinTool(name: string): boolean {
+  return name === CHAT_HISTORY_TOOL || isGoogleTool(name);
+}
+
 /** True when the gateway's chatId carries a real WhatsApp jid (personal channel encodes `tenant::jid`).
  *  SIM/trigger contexts have no such chat, so the chat_history tool isn't offered there. */
 function hasChatContext(chatId?: string): boolean {
@@ -42,8 +49,11 @@ export class WorkflowAgentRuntime implements AgentRuntime {
   constructor(
     private readonly getSpec: (agentId: string) => AgentSpec | undefined,
     private readonly llm: WorkflowLlm,
-    private readonly getStylePreamble?: (agentId: string) => string,
+    /** Per-agent system-prompt preamble (owner's writing style, Google connections), '' for none. */
+    private readonly getPreamble?: (agentId: string) => string,
     private readonly getExecutor?: (agentId: string, chatId?: string) => ((name: string, input: Record<string, unknown>) => Promise<string>) | undefined,
+    /** Per-agent built-in tools beyond chat_history (e.g. its Google connection tools). */
+    private readonly getAgentTools?: (agentId: string) => AgentTool[],
   ) {}
 
   async complete({ agentId, messages, chatId, currentTurnMedia, noTools, executor }: { agentId: string; messages: RuntimeMessage[]; conversationId?: string; chatId?: string; currentTurnMedia?: { kind: 'image' | 'document'; base64: string; mediaType: string; filename?: string }; noTools?: boolean; executor?: (name: string, input: Record<string, unknown>) => Promise<string> }): Promise<AgentReply> {
@@ -53,8 +63,8 @@ export class WorkflowAgentRuntime implements AgentRuntime {
       this.lastUsage = { inputTokens: 0, outputTokens: 0 };
       return { text: "This agent isn't available.", usage: { inputTokens: 0, outputTokens: 0 }, finishReason: 'stop' };
     }
-    // Per-call style injection for this agent's owner (no shared mutable state).
-    const pre = this.getStylePreamble?.(agentId) ?? '';
+    // Per-call preamble injection for this agent (no shared mutable state).
+    const pre = this.getPreamble?.(agentId) ?? '';
     const llm: WorkflowLlm = pre
       ? { classifyIntent: (a) => this.llm.classifyIntent(a), reply: (a) => this.llm.reply({ ...a, systemPrompt: `${pre}\n\n${a.systemPrompt}` }) }
       : this.llm;
@@ -65,8 +75,10 @@ export class WorkflowAgentRuntime implements AgentRuntime {
     // mirrors production without real side-effects. noTools = no executor at all. Else the live executor.
     const exec = executor ?? (noTools ? undefined : this.getExecutor?.(agentId, chatId));
     // Offer the built-in chat_history tool only when this turn is in a real WhatsApp chat (so the agent
-    // can fetch the thread's prior messages on demand). It bypasses sub-agent tool allow-lists.
-    const ambientTools = exec && hasChatContext(chatId) ? [chatHistoryTool] : undefined;
+    // can fetch the thread's prior messages on demand), plus the agent's Google connection tools in every
+    // context (chats, simulator, timed actions). Built-ins bypass sub-agent tool allow-lists.
+    const builtins = exec ? [...(hasChatContext(chatId) ? [chatHistoryTool] : []), ...(this.getAgentTools?.(agentId) ?? [])] : [];
+    const ambientTools = builtins.length ? builtins : undefined;
     const r = await new WorkflowEngine(spec, llm).handle(wmsgs, currentTurnMedia, exec, ambientTools);
     this.lastRoutedTo = r.routedTo;
     this.lastUsage = r.usage;

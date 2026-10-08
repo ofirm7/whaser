@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { authenticate, registerUser, tenantName } from './directory';
 import { AppState } from './store';
+import { callbackPage, suggestConnections } from './google';
 import type { TuningSuggestion } from '../../../packages/agent-builder/src/index';
 import { createWebhookRouter } from '../../../packages/whatsapp-gateway/src/express';
 
@@ -63,6 +64,25 @@ const catalogSummary = (e: ReturnType<AppState['listCatalog']>[number]) => ({
   model: e.spec.model_assignment,
   goal: e.spec.goal,
 });
+
+/** Where Google sends the OAuth pop-up back to — must be registered on the Google OAuth client.
+ *  GOOGLE_REDIRECT_URI pins it; otherwise it follows the URL the app is being used at. */
+function googleRedirectUri(req: Request): string {
+  if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
+  const proto = String(req.header('x-forwarded-proto') ?? req.protocol).split(',')[0].trim();
+  const host = String(req.header('x-forwarded-host') ?? req.get('host') ?? '').split(',')[0].trim();
+  return `${proto}://${host}/api/google/callback`;
+}
+
+const GOOGLE_NONCE_COOKIE = 'whaser_google_nonce';
+
+function readCookie(req: Request, name: string): string | null {
+  for (const part of (req.header('cookie') ?? '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return null;
+}
 
 const app = express();
 
@@ -211,22 +231,23 @@ app.post('/api/wizard/finalize', wrap(async (req, res, auth) => {
   }
   const r = await state.builder.finalizeInterview(session.messages);
   session.finalizeResult = r;
-  res.json(r);
+  // Pre-tick the Google connections the conversation asked for (the owner confirms in the publish step).
+  res.json({ ...r, suggestedConnections: suggestConnections(session.messages) });
 }));
 
 app.post('/api/wizard/publish', wrap(async (req, res, auth) => {
-  const { sessionId } = (req.body ?? {}) as { sessionId?: string };
+  const { sessionId, connections } = (req.body ?? {}) as { sessionId?: string; connections?: unknown };
   const session = state.getSession(String(sessionId));
   if (!session || session.ownerUsername !== auth.username) {
     res.sendStatus(404);
     return;
   }
-  const agent = state.publish(session);
+  const agent = state.publish(session, connections);
   state.bindChatsToAgent(agent.id, session.tenantId, session.selectedChats ?? []);
   // Behind the scenes: if the design conversation asked for the owner's own style/voice, learn it
   // from their WhatsApp writing and tune the new agent to match (best-effort; never blocks publish).
   const ownerStyled = await state.applyOwnerStyleIfRequested(agent.id, session.tenantId, session.messages);
-  res.json({ agentId: agent.id, phoneNumberId: agent.phoneNumberId, listenChats: agent.listenChats, status: agent.status, ownerStyled });
+  res.json({ agentId: agent.id, phoneNumberId: agent.phoneNumberId, listenChats: agent.listenChats, status: agent.status, ownerStyled, connections: agent.connections ?? {} });
 }));
 
 // --- Agents (tenant-scoped) ---
@@ -240,7 +261,7 @@ app.get('/api/agents/:id', wrap(async (req, res, auth) => {
     res.sendStatus(404);
     return;
   }
-  res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername, listenChats: a.listenChats, triggers: a.triggers ?? [], answerSelf: a.answerSelf === true });
+  res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername, listenChats: a.listenChats, triggers: a.triggers ?? [], answerSelf: a.answerSelf === true, connections: a.connections ?? {} });
 }));
 
 app.delete('/api/agents/:id', wrap(async (req, res, auth) => {
@@ -281,6 +302,48 @@ app.get('/api/whatsapp/status', wrap(async (_req, res) => {
 app.post('/api/agents/:id/connect-whatsapp', wrap(async (req, res, auth) => {
   const a = state.bindRealNumber(req.params.id, auth.tenantId);
   res.json({ id: a.id, phoneNumberId: a.phoneNumberId, boundAgentId: a.id });
+}));
+
+// --- Google account (one per workspace) behind agents' Gmail / Calendar / Drive connections ---
+app.get('/api/google/status', wrap(async (_req, res, auth) => {
+  res.json(state.google.status(auth.tenantId));
+}));
+
+// Start linking: returns Google's consent URL for the pop-up. A nonce cookie ties the callback to this
+// browser, so a sign-in link started by someone else can't attach a Google account to their workspace.
+app.post('/api/google/connect', wrap(async (req, res, auth) => {
+  const { services } = (req.body ?? {}) as { services?: unknown };
+  const { url, nonce } = state.google.beginAuth({ tenantId: auth.tenantId, username: auth.username, services, redirectUri: googleRedirectUri(req) });
+  const secure = googleRedirectUri(req).startsWith('https:');
+  res.cookie(GOOGLE_NONCE_COOKIE, nonce, { httpOnly: true, sameSite: 'lax', secure, maxAge: 10 * 60_000, path: '/api/google/callback' });
+  res.json({ url });
+}));
+
+// The OAuth redirect target (a browser navigation, so no bearer token — the one-time state + nonce
+// cookie identify the workspace). Renders a small page that tells the opener and closes itself.
+app.get('/api/google/callback', async (req: Request, res: Response) => {
+  const { code, state: oauthState, error } = req.query as Record<string, string | undefined>;
+  let ok = false;
+  let message: string;
+  if (error) {
+    state.google.cancelAuth(String(oauthState ?? ''));
+    message = error === 'access_denied' ? 'Google access was not granted.' : `Google sign-in failed (${error}).`;
+  } else {
+    try {
+      await state.google.completeAuth({ state: String(oauthState ?? ''), code: String(code ?? ''), nonce: readCookie(req, GOOGLE_NONCE_COOKIE) });
+      ok = true;
+      message = 'Google account connected.';
+    } catch (e) {
+      message = e instanceof Error ? e.message : 'Google sign-in failed.';
+    }
+  }
+  res.clearCookie(GOOGLE_NONCE_COOKIE, { path: '/api/google/callback' });
+  res.set('Cache-Control', 'no-store').type('html').send(callbackPage(ok, message));
+});
+
+app.post('/api/google/disconnect', wrap(async (_req, res, auth) => {
+  await state.google.disconnect(auth.tenantId);
+  res.json(state.google.status(auth.tenantId));
 }));
 
 // --- QR-linked personal WhatsApp (POC) — each user links their OWN account (tenant-scoped) ---
@@ -358,6 +421,14 @@ app.post('/api/agents/:id/chats', wrap(async (req, res, auth) => {
     .map((c) => ({ id: String(c.id), name: String(c.name) }));
   const a = state.editChats(req.params.id, auth.tenantId, list);
   res.json({ id: a.id, listenChats: a.listenChats });
+}));
+
+// Which Google services (Gmail / Calendar / Drive) the agent may use, each 'read' or 'read_write'.
+app.post('/api/agents/:id/connections', wrap(async (req, res, auth) => {
+  const { connections } = (req.body ?? {}) as { connections?: unknown };
+  const a = state.setConnections(req.params.id, auth.tenantId, connections);
+  if (!a) { res.sendStatus(404); return; }
+  res.json({ id: a.id, connections: a.connections ?? {} });
 }));
 
 app.post('/api/agents/:id/answer-self', wrap(async (req, res, auth) => {

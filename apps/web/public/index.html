@@ -272,7 +272,38 @@ const I18N = { he: {
     "Delete trigger?": "למחוק את הטריגר?",
     "This scheduled trigger will be removed. This can't be undone.": "הטריגר המתוזמן יוסר. לא ניתן לבטל פעולה זו.",
     "Edit trigger": "עריכת טריגר",
-    "Save trigger": "שמירת טריגר"
+    "Save trigger": "שמירת טריגר",
+    "Loading…": "טוען…",
+    "🔗 Google connections": "🔗 חיבורי Google",
+    "Let this agent use your Gmail, Google Calendar and Google Drive — pick Read only or Read & write for each.": "אפשרו לסוכן להשתמש ב-Gmail, ביומן Google וב-Google Drive שלכם — בחרו לכל אחד קריאה בלבד או קריאה וכתיבה.",
+    "Optional — you can also add these later from the agent's page.": "אופציונלי — אפשר להוסיף אותם גם בהמשך מעמוד הסוכן.",
+    "Pre-selected from your conversation — change anything you like.": "נבחר מראש לפי השיחה שלכם — אפשר לשנות הכול.",
+    "Google Calendar": "יומן Google",
+    "Read only": "קריאה בלבד",
+    "Read & write": "קריאה וכתיבה",
+    "search and read email": "חיפוש וקריאה של מיילים",
+    "+ send, draft, mark read/archive": "+ שליחה, טיוטות, סימון כנקרא/העברה לארכיון",
+    "see events and availability": "צפייה באירועים ובזמינות",
+    "+ create, change and delete events": "+ יצירה, שינוי ומחיקה של אירועים",
+    "search and read files": "חיפוש וקריאה של קבצים",
+    "+ create and update files": "+ יצירה ועדכון של קבצים",
+    "✓ access granted": "✓ יש גישה",
+    "needs Google access": "נדרשת גישה ל-Google",
+    "Connected as {0}": "מחובר כ-{0}",
+    "No Google account connected yet.": "עדיין לא חובר חשבון Google.",
+    "Connect Google": "חיבור Google",
+    "Reconnect Google to grant the selected access": "חיבור מחדש של Google כדי לתת את הגישה שנבחרה",
+    "Waiting for Google sign-in… finish it in the pop-up window.": "ממתין להתחברות ל-Google… השלימו אותה בחלון הקופץ.",
+    "Pop-up blocked — open Google sign-in": "החלון הקופץ נחסם — פתחו את ההתחברות ל-Google",
+    "Disconnect Google": "ניתוק Google",
+    "Disconnect Google?": "לנתק את Google?",
+    "Every agent in this workspace loses access to your Gmail, Calendar and Drive until you connect again.": "כל הסוכנים בסביבת העבודה הזו יאבדו את הגישה ל-Gmail, ליומן ול-Drive שלכם עד שתתחברו שוב.",
+    "Google isn't set up on this server yet — the admin needs to add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (see apps/web/README.md).": "Google עדיין לא הוגדר בשרת הזה — מנהל המערכת צריך להוסיף GOOGLE_CLIENT_ID ו-GOOGLE_CLIENT_SECRET (ראו apps/web/README.md).",
+    "⚠️ Anyone who can message this agent can ask it to use what you connect here — for example to read your email or, with Read & write, to send email as you. Connect only what this agent needs.": "⚠️ כל מי שיכול לשלוח הודעה לסוכן יכול לבקש ממנו להשתמש במה שתחברו כאן — למשל לקרוא את המיילים שלכם או, עם קריאה וכתיבה, לשלוח מיילים בשמכם. חברו רק את מה שהסוכן הזה צריך.",
+    "Google:": "Google:",
+    "no Google connections": "אין חיבורי Google",
+    "Save connections": "שמירת החיבורים",
+    "⚠ Google isn't connected with this access yet — open 🔗 Google connections.": "⚠ Google עדיין לא מחובר עם הגישה הזו — פתחו את 🔗 חיבורי Google."
   } };
 let lang = localStorage.getItem('whaser_lang') || 'en';
 function t(s){ const d = I18N[lang]; return (d && d[s] != null) ? d[s] : s; }
@@ -577,14 +608,17 @@ async function AgentDetailView(wrap, id){
       : `<div style="margin-top:10px muted"><b>${t('Workflow:')}</b> <span class="muted">${t('single agent')}</span></div>`}
     ${(a.spec.skills&&a.spec.skills.length)?`<div style="margin-top:10px"><b>${t('Skills:')}</b> ${a.spec.skills.map(s=>`<span class="pill" title="${esc(s.description)}">🧩 ${esc(s.name)}</span>`).join('')}</div>`:''}
     <div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?(`<b>${t('Listening on:')}</b> `+a.listenChats.map(c=>`<span class="pill">💬 ${esc(c.name)}</span>`).join('')):`<span class="muted"><b>${t('Listening on:')}</b> ${t('no chats selected (chosen during creation)')}</span>`}</div>
+    <div style="margin-top:6px" id="connline">${Object.keys(a.connections||{}).length?(`<b>${t('Google:')}</b> `+connectionPills(a.connections)):`<span class="muted"><b>${t('Google:')}</b> ${t('no Google connections')}</span>`}</div>
     <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?t('Pause'):t('Resume')}</button>
     <button class="ghost" id="showspec">${t('View AgentSpec')}</button>
     <button id="editchats">${t('✏️ Edit chats')}</button>
+    <button id="editconns">${t('🔗 Google connections')}</button>
     <button id="answerself" class="${a.answerSelf?'primary':''}" title="${t('When on, the agent also replies to messages YOU send from your connected WhatsApp.')}">${a.answerSelf?t('🙋 Answer my own messages: On'):t('🙋 Answer my own messages: Off')}</button>
     ${whatsapp.configured ? `<button id="connectwa" class="${whatsapp.boundAgentId===a.id?'':'primary'}">${whatsapp.boundAgentId===a.id?t('✓ Cloud API connected'):tf('📲 Connect Cloud API ({0})', esc(whatsapp.phoneNumberId))}</button>` : ''}
     <button class="danger" id="delete" style="margin-inline-start:auto">${t('🗑 Delete agent')}</button></div>
     <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>
-    <div id="chatedit"></div>`;
+    <div id="chatedit"></div>
+    <div id="connedit"></div>`;
   head.querySelector('#toggle').onclick = async ()=>{ await api('/api/agents/'+id+'/'+(a.status==='live'?'pause':'resume'),'POST'); render(); };
   head.querySelector('#answerself').onclick = async ()=>{ try{ await api('/api/agents/'+id+'/answer-self','POST',{ enabled: !a.answerSelf }); render(); }catch(e){ alert(e.message); } };
   head.querySelector('#delete').onclick = async ()=>{
@@ -599,6 +633,19 @@ async function AgentDetailView(wrap, id){
     buildChatPicker(c, a.listenChats||[], t('Save chats'), async (chats, btn)=>{ btn.disabled=true;
       try{ await api('/api/agents/'+id+'/chats','POST',{ chats }); render(); }
       catch(e){ alert(e.message); btn.disabled=false; } }); };
+  head.querySelector('#editconns').onclick = ()=>{ const c=head.querySelector('#connedit');
+    if (c.dataset.open){ c.innerHTML=''; delete c.dataset.open; return; }
+    c.dataset.open='1';
+    const picker=buildConnectionsPicker(c, a.connections||{});
+    const sv=$(`<button class="primary" style="margin-top:8px">${t('Save connections')}</button>`); c.appendChild(sv);
+    sv.onclick=async()=>{ sv.disabled=true;
+      try{ await api('/api/agents/'+id+'/connections','POST',{ connections: picker.get() }); render(); }
+      catch(e){ alert(e.message); sv.disabled=false; } }; };
+  // Flag connections the workspace's Google account doesn't (yet) grant, so the owner knows to link it.
+  if (Object.keys(a.connections||{}).length) api('/api/google/status').then(gs=>{
+    if (Object.entries(a.connections).some(([k,acc])=>!(gs.connected&&googleCovers(gs.granted,k,acc))))
+      head.querySelector('#connline').appendChild($(`<div class="err" style="font-size:13px;margin-top:4px">${t("⚠ Google isn't connected with this access yet — open 🔗 Google connections.")}</div>`));
+  }).catch(()=>{});
   const cw = head.querySelector('#connectwa');
   if (cw && whatsapp.boundAgentId!==a.id) cw.onclick = async ()=>{ cw.disabled=true;
     try{ const r=await api('/api/agents/'+id+'/connect-whatsapp','POST'); whatsapp.boundAgentId=r.boundAgentId; render(); }
@@ -943,6 +990,92 @@ async function buildChatPicker(container, preselected, saveLabel, onSave, opts){
   renderChips(); doSearch();
 }
 
+// Google connections picker (create wizard + agent page): tick Gmail / Google Calendar / Google Drive and
+// choose Read only or Read & write for each. Links the workspace's Google account in a pop-up when the
+// ticked access isn't granted yet. Returns { get } → the selection, e.g. { gmail:'read_write' }.
+const GOOGLE_SERVICES = [
+  { k:'gmail', icon:'📧', name:'Gmail', read:'search and read email', write:'+ send, draft, mark read/archive' },
+  { k:'calendar', icon:'📅', name:'Google Calendar', read:'see events and availability', write:'+ create, change and delete events' },
+  { k:'drive', icon:'📁', name:'Google Drive', read:'search and read files', write:'+ create and update files' },
+];
+function googleCovers(granted, k, access){ const g=(granted||{})[k]; return access==='read' ? !!g : g==='read_write'; }
+function connectionPills(conns){ return GOOGLE_SERVICES.filter(s=>conns&&conns[s.k]).map(s=>`<span class="pill">${s.icon} ${esc(t(s.name))} · ${esc(conns[s.k]==='read_write'?t('Read & write'):t('Read only'))}</span>`).join(''); }
+
+function buildConnectionsPicker(container, preset, opts){
+  const sel={...(preset||{})};
+  const suggested = !!(opts && opts.suggested) && Object.keys(sel).length>0;
+  const box=$('<div class="card" style="margin-top:8px"></div>'); container.innerHTML=''; container.appendChild(box);
+  let st=null, waiting=false, blockedUrl=null, poll=null, pollEnd=0;
+  const alive=()=>document.body.contains(box);
+  const missing=()=>Object.entries(sel).filter(([k,acc])=>!(st&&st.connected&&googleCovers(st.granted,k,acc)));
+  const onMsg=(e)=>{ if(e.origin===location.origin && e.data && e.data.type==='whaser-google') check(); };
+  const stopWaiting=()=>{ waiting=false; blockedUrl=null; if(poll){ clearInterval(poll); poll=null; } window.removeEventListener('message', onMsg); };
+  async function load(){
+    try{ st=await api('/api/google/status'); }catch{ st=st||{ configured:false, connected:false, granted:{} }; }
+    if(!st.configured) for(const k in sel) delete sel[k]; // nothing can be connected on this server — never save a dead connection
+  }
+  async function check(){
+    if(!alive()){ stopWaiting(); return; }
+    await load();
+    if((st.connected && !missing().length) || Date.now()>pollEnd) stopWaiting();
+    paint();
+  }
+  async function connect(btn){
+    btn.disabled=true;
+    const w=window.open('', 'whaser-google', 'width=520,height=680'); // opened inside the click so it isn't blocked
+    let url;
+    try{ ({ url }=await api('/api/google/connect','POST',{ services: sel })); }
+    catch(e){ if(w) w.close(); alert(e.message); btn.disabled=false; return; }
+    if(w && !w.closed) w.location.href=url; else blockedUrl=url;
+    waiting=true; pollEnd=Date.now()+10*60*1000;
+    window.addEventListener('message', onMsg);
+    if(!poll) poll=setInterval(check, 2500);
+    paint();
+  }
+  async function disconnect(){
+    const ok=await confirmDialog({ title:t('Disconnect Google?'), message:t('Every agent in this workspace loses access to your Gmail, Calendar and Drive until you connect again.'), confirmLabel:t('Disconnect Google'), danger:true });
+    if(!ok) return;
+    try{ st=await api('/api/google/disconnect','POST'); }catch(e){ alert(e.message); }
+    paint();
+  }
+  function paint(){
+    box.innerHTML=`<b>${t('🔗 Google connections')}</b>
+      <div class="muted" style="margin:4px 0 8px">${t('Let this agent use your Gmail, Google Calendar and Google Drive — pick Read only or Read & write for each.')}
+      ${opts&&opts.optional?' '+t("Optional — you can also add these later from the agent's page."):''}</div>`;
+    if(!st){ box.appendChild($(`<div class="muted">${t('Loading…')}</div>`)); return; }
+    if(!st.configured){ box.appendChild($(`<div class="muted">${t("Google isn't set up on this server yet — the admin needs to add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (see apps/web/README.md).")}</div>`)); return; }
+    if(suggested) box.appendChild($(`<div class="muted" style="margin-bottom:6px">${t('Pre-selected from your conversation — change anything you like.')}</div>`));
+    for(const s of GOOGLE_SERVICES){
+      const on=!!sel[s.k], acc=sel[s.k]||'read_write';
+      const row=$('<div class="row" style="flex-wrap:wrap;gap:8px;padding:8px 0;border-top:1px solid var(--line)"></div>');
+      row.innerHTML=`<label class="row" style="gap:10px;margin:0;flex:1;min-width:220px;color:var(--text);font-size:15px;cursor:pointer">
+          <input type="checkbox" style="width:17px;height:17px;min-width:17px;margin:0;accent-color:var(--accent)"${on?' checked':''}/>
+          <span>${s.icon} <b>${esc(t(s.name))}</b><div class="muted" style="font-size:12.5px">${esc(t(s.read))}${acc==='read_write'?' '+esc(t(s.write)):''}</div></span></label>
+        <select${on?'':' disabled'}><option value="read"${acc==='read'?' selected':''}>${t('Read only')}</option><option value="read_write"${acc==='read_write'?' selected':''}>${t('Read & write')}</option></select>
+        <span style="font-size:12.5px;min-width:120px">${on?(st.connected&&googleCovers(st.granted,s.k,acc)?`<span class="ok">${t('✓ access granted')}</span>`:`<span class="muted">${t('needs Google access')}</span>`):''}</span>`;
+      row.querySelector('input').onchange=(e)=>{ if(e.target.checked) sel[s.k]=acc; else delete sel[s.k]; paint(); };
+      row.querySelector('select').onchange=(e)=>{ sel[s.k]=e.target.value; paint(); };
+      box.appendChild(row);
+    }
+    const foot=$('<div style="border-top:1px solid var(--line);padding-top:10px"></div>'); box.appendChild(foot);
+    if(st.connected){
+      const line=$(`<div class="row" style="flex-wrap:wrap;gap:8px"><span class="ok">${esc(tf('Connected as {0}', st.email||st.connectedBy||'Google'))}</span><button class="ghost" style="margin-inline-start:auto">${t('Disconnect Google')}</button></div>`);
+      line.querySelector('button').onclick=disconnect; foot.appendChild(line);
+    } else foot.appendChild($(`<div class="muted">${t('No Google account connected yet.')}</div>`));
+    if(missing().length){
+      const cb=$(`<button class="primary" style="margin-top:8px">${st.connected?t('Reconnect Google to grant the selected access'):t('Connect Google')}</button>`);
+      cb.onclick=()=>connect(cb); foot.appendChild(cb);
+    }
+    if(waiting){
+      foot.appendChild($(`<div class="muted" style="margin-top:8px">${t('Waiting for Google sign-in… finish it in the pop-up window.')}</div>`));
+      if(blockedUrl){ const a=$(`<a target="_blank" rel="opener" style="display:inline-block;margin-top:4px">${t('Pop-up blocked — open Google sign-in')}</a>`); a.href=blockedUrl; foot.appendChild(a); }
+    }
+    if(Object.keys(sel).length) box.appendChild($(`<div class="card" style="border-color:var(--danger);margin:10px 0 0;padding:10px 12px;font-size:13.5px">${t('⚠️ Anyone who can message this agent can ask it to use what you connect here — for example to read your email or, with Read & write, to send email as you. Connect only what this agent needs.')}</div>`));
+  }
+  paint(); load().then(paint);
+  return { get: ()=>({ ...sel }) };
+}
+
 async function CreateView(wrap){
   wrap.appendChild($(`<h1>${t('Create a new agent')}</h1>`));
   wrap.appendChild($(`<div class="muted" style="margin-bottom:12px">${t('Chat with Whaser to design your agent — describe what you want and the capabilities it needs (web search, webhooks, scheduled messages…). Whaser asks follow-ups, then builds the full agent from the conversation.')}</div>`));
@@ -999,12 +1132,14 @@ async function CreateView(wrap){
         <pre>${esc(JSON.stringify(r.spec,null,2))}</pre>`;
       if (r.publishable){
         setBusy(true); // design is done — lock the chat while picking chats + publishing
+        const connBox=$('<div></div>'); box.appendChild(connBox);
+        const conns=buildConnectionsPicker(connBox, r.suggestedConnections||{}, { suggested:true, optional:true });
         box.appendChild($(`<div class="muted" style="margin-top:8px">${t('Choose which WhatsApp chats this agent should answer, then publish. Chats are optional — you can publish now and bind them later.')}</div>`));
         const pick=$('<div></div>'); box.appendChild(pick);
         // allowEmpty: publishing is never blocked by an unlinked WhatsApp or an empty selection.
         buildChatPicker(pick, [], t('Publish & bind a number'), async (chats, saveBtn)=>{ saveBtn.disabled=true;
           try{ await api('/api/wizard/select-chats','POST',{ sessionId, chats });
-            const pub=await api('/api/wizard/publish','POST',{ sessionId });
+            const pub=await api('/api/wizard/publish','POST',{ sessionId, connections: conns.get() });
             box.appendChild($(`<div class="ok" style="margin-top:10px">${tf('Published as {0} on {1}. Opening…', esc(pub.agentId), esc(pub.phoneNumberId))}</div>`));
             if (pub.ownerStyled) box.appendChild($(`<div class="muted" style="margin-top:4px">${t('✓ Tuned to write in your personal style.')}</div>`));
             setTimeout(()=>{ view='agent:'+pub.agentId; render(); }, 700);

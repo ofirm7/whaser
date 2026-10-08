@@ -14,11 +14,11 @@ const ambientTool: AgentTool = {
 
 /** An LLM seam that records the `tools` list handed to reply() (for ambient-tool assertions). */
 function llmRecordingTools(classify: string | null = null) {
-  const toolLists: Array<Array<{ name: string }> | undefined> = [];
+  const toolLists: Array<Array<{ name: string; description: string }> | undefined> = [];
   const llm: WorkflowLlm = {
     async classifyIntent() { return classify; },
     async reply({ tools }) {
-      toolLists.push(tools?.map((t) => ({ name: t.name })));
+      toolLists.push(tools?.map((t) => ({ name: t.name, description: t.description })));
       return { text: 'ok', usage: { inputTokens: 1, outputTokens: 1 } };
     },
   };
@@ -113,6 +113,14 @@ describe('WorkflowEngine', () => {
     const names = (h.toolLists[0] ?? []).map((t) => t.name);
     expect(names).toContain('lookup_plan'); // the sub-agent's one allowed tool
     expect(names).toContain('chat_history'); // ambient — present despite not being in tool_names
+  });
+
+  it('drops a declared tool that shares a name with an ambient built-in (built-in wins, names stay unique)', async () => {
+    const h = llmRecordingTools();
+    const builtin: AgentTool = { ...ambientTool, name: 'lookup_plan', description: 'Built-in backend.' };
+    await new WorkflowEngine(validSpec, h.llm).handle([{ role: 'user', content: 'hi' }], undefined, async () => 'tool output', [builtin]);
+    const tools = h.toolLists[0] ?? [];
+    expect(tools.filter((t) => t.name === 'lookup_plan')).toEqual([{ name: 'lookup_plan', description: 'Built-in backend.' }]);
   });
 
   it('offers no tools at all (ambient included) when there is no executor', async () => {
