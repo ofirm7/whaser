@@ -62,31 +62,37 @@ agent page → **🔗 Google connections**). The agent then gets real tools for 
 | Google Calendar | list events / check availability | create, update, delete events (attendees are notified) |
 | Google Drive | search, read files (Docs, Sheets as CSV, Slides, text; folders list their files) | create Docs/Sheets/text files, replace a file's content, rename |
 
-Each workspace links **one** Google account (OAuth pop-up; tokens are stored in the gitignored
-`.data/google-accounts.json`, owner-only permissions), and every agent in the workspace can opt into it.
-Writes are simulated during the improve chat's test runs. The agent page warns when an agent's
-connections aren't granted by the linked account yet.
+Each workspace uses **its own Google OAuth client**, entered in the UI under **⚙️ Settings → Google**
+(the connections picker opens the same form if it's missing), and links **one** Google account (OAuth
+pop-up). Every agent in the workspace can opt into that account. The client secret is write-only (the
+UI only ever shows its last 4 characters); on save, Whaser asks Google to confirm the ID + secret pair.
+Client + tokens are stored owner-only in the gitignored `.data/google-clients.json` /
+`.data/google-accounts.json`. Switching to a different client unlinks the account (its tokens belong
+to the old client). Writes are simulated during the improve chat's test runs. The agent page warns when
+an agent's connections aren't granted by the linked account yet.
 
 > ⚠️ Anyone who can message an agent can ask it to use its connections — with Gmail **Read & write**
 > that includes sending email as you. Grant write access only to agents that need it.
 
-Setup (once per server):
+Creating the OAuth client (once per workspace — the Settings page walks through it):
 
-1. In [Google Cloud Console](https://console.cloud.google.com/) create a project, enable the
-   **Gmail API**, **Google Calendar API** and **Google Drive API**, and configure the OAuth consent
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials) create a project, enable
+   the **Gmail API**, **Google Calendar API** and **Google Drive API**, and configure the OAuth consent
    screen (while it's in *Testing*, add your Google accounts as test users).
-2. Create an **OAuth client ID** of type *Web application* and add the redirect URI
-   `https://<your-domain>/api/google/callback`. Google only accepts `https://` redirect URIs on a real
-   domain — or `http://localhost:<port>/api/google/callback` for local use (e.g. through an SSH tunnel).
-   Raw IP addresses are rejected.
-3. Add to `apps/web/.env` and restart:
+2. Create an **OAuth client ID** of type *Web application* and add the **Authorized redirect URI** shown
+   in Settings (`<the URL you opened Whaser at>/api/google/callback`). Google only accepts `https://` on a
+   real domain, or `http://localhost:<port>` (e.g. through an SSH tunnel) — never a raw IP address; the
+   Settings page warns when the current address won't work.
+3. Paste the client ID and secret into Settings → Google and save.
 
-   ```bash
-   GOOGLE_CLIENT_ID=1234-abc.apps.googleusercontent.com
-   GOOGLE_CLIENT_SECRET=GOCSPX-...
-   # optional — otherwise derived from the URL the app is opened at (honours X-Forwarded-Proto/Host)
-   GOOGLE_REDIRECT_URI=https://whaser.example.com/api/google/callback
-   ```
+Optional server-wide default (used by workspaces that haven't saved their own), in `apps/web/.env`:
+
+```bash
+GOOGLE_CLIENT_ID=1234-abc.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-...
+# optional — otherwise derived from the URL the app is opened at (honours X-Forwarded-Proto/Host)
+GOOGLE_REDIRECT_URI=https://whaser.example.com/api/google/callback
+```
 
 Scopes requested: `gmail.readonly` / `gmail.modify`, `calendar.events.readonly` / `calendar.events`,
 `drive.readonly` / `drive` (read / read & write). The Gmail and Drive scopes are Google *restricted*
