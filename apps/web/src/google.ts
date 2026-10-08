@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentTool } from '../../../packages/agent-builder/src/index';
@@ -105,6 +105,8 @@ export interface GoogleClientSettings {
   secretHint: string | null;
   updatedBy: string | null;
   updatedAt: number | null;
+  /** Set when a saved Google file couldn't be trusted at startup, so nothing can be saved until it's fixed. */
+  problem: string | null;
 }
 
 const CLIENT_ID_RE = /^[\w.-]+\.apps\.googleusercontent\.com$/;
@@ -212,50 +214,104 @@ function sameSecret(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-/** Read a JSON object store (tenantId → record); a missing or unreadable file starts empty. */
-function readStore<T>(file: string, what: string): Record<string, T> {
-  try {
-    if (existsSync(file)) {
-      const d = JSON.parse(readFileSync(file, 'utf8')) as unknown;
-      if (d && typeof d === 'object' && !Array.isArray(d)) return d as Record<string, T>;
-    }
-  } catch (e) {
-    console.error(`[google] could not read the ${what}; starting empty`, e instanceof Error ? e.message : e);
+/**
+ * A tenantId → record JSON file, hardened like persistence.ts: every save rewrites the WHOLE file from
+ * memory, so a store that silently loaded as {} would let the next save wipe every workspace's Google
+ * client or tokens. A damaged file is therefore preserved (copied beside it) and the store goes
+ * read-only — saves throw — instead of being papered over; the rest of the app keeps running. Odd
+ * records are dropped but the original file is kept. Saves are atomic (tmp + rename), owner-only
+ * (secrets, refresh tokens), and a failed save throws without changing memory.
+ */
+class JsonStore<T> {
+  data: Record<string, T> = {};
+  /** Why saving is refused (the file on disk couldn't be trusted), or null. Logged in full at startup. */
+  readonly locked: string | null;
+
+  constructor(private readonly file: string, private readonly what: string, isRecord: (r: unknown) => boolean) {
+    this.locked = this.load(isRecord);
+    if (this.locked) console.error(`[google] ${this.locked} — refusing to save the ${what} until it's fixed (then restart).`);
   }
-  return {};
+
+  private load(isRecord: (r: unknown) => boolean): string | null {
+    if (!existsSync(this.file)) return null;
+    let raw: string;
+    try {
+      raw = readFileSync(this.file, 'utf8');
+    } catch (e) {
+      return `${this.file} exists but couldn't be read (${e instanceof Error ? e.message : String(e)})`;
+    }
+    if (!raw.trim()) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return `${this.file} isn't valid JSON; a copy was preserved at ${this.preserve(raw)}`;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return `${this.file} has an unexpected shape; a copy was preserved at ${this.preserve(raw)}`;
+    const entries = Object.entries(parsed as Record<string, unknown>);
+    const good = entries.filter(([, r]) => isRecord(r));
+    if (entries.length && !good.length) return `${this.file} has no valid records; a copy was preserved at ${this.preserve(raw)}`;
+    if (good.length !== entries.length) console.error(`[google] dropped ${entries.length - good.length} unreadable record(s) from the ${this.what}; original preserved at ${this.preserve(raw)}`);
+    this.data = Object.fromEntries(good) as Record<string, T>;
+    return null;
+  }
+
+  private preserve(raw: string): string {
+    const bak = `${this.file}.corrupt-${Date.now()}`;
+    try {
+      writeFileSync(bak, raw, { mode: 0o600 });
+    } catch {
+      /* best effort */
+    }
+    return bak;
+  }
+
+  /** Write `next` (default: the current data) and only then make it the in-memory state. */
+  save(next: Record<string, T> = this.data): void {
+    if (this.locked) throw new Error(`Whaser couldn't read its saved Google ${this.what}, so it won't overwrite it. An admin needs to check the server log, fix the file and restart.`);
+    const tmp = `${this.file}.tmp`;
+    try {
+      const dir = dirname(this.file);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      writeFileSync(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });
+      renameSync(tmp, this.file);
+    } catch (e) {
+      try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* ignore */ }
+      console.error(`[google] FAILED to save the ${this.what}:`, e);
+      throw new Error(`Couldn't save the Google ${this.what} on the server.`);
+    }
+    this.data = next;
+  }
 }
 
-/** Persist atomically, owner-only (these files hold secrets and refresh tokens). */
-function writeStore(file: string, data: unknown, what: string): void {
-  try {
-    const dir = dirname(file);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const tmp = `${file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
-    renameSync(tmp, file);
-  } catch (e) {
-    console.error(`[google] could not save the ${what}`, e instanceof Error ? e.message : e);
-  }
+/** `data` without one tenant's record. */
+function without<T>(data: Record<string, T>, tenantId: string): Record<string, T> {
+  const { [tenantId]: _gone, ...rest } = data;
+  return rest;
 }
+
+const isObj = (r: unknown): r is Record<string, unknown> => !!r && typeof r === 'object' && !Array.isArray(r);
+const isStoredClient = (r: unknown): boolean => isObj(r) && typeof r.clientId === 'string' && typeof r.clientSecret === 'string';
+const isGrant = (r: unknown): boolean => isObj(r) && typeof r.accessToken === 'string' && typeof r.refreshToken === 'string' && Array.isArray(r.scopes);
 
 export class GoogleAccounts {
-  private grants: Record<string, GoogleGrant>;
-  private clients: Record<string, StoredClient>;
+  private readonly grants: JsonStore<GoogleGrant>;
+  private readonly clients: JsonStore<StoredClient>;
   private readonly pending = new Map<string, PendingAuth>();
   /** One in-flight token refresh per workspace, shared by concurrent tool calls. */
   private readonly refreshing = new Map<string, Promise<string>>();
 
   constructor(
-    private readonly file = fileURLToPath(new URL('../.data/google-accounts.json', import.meta.url)),
-    private readonly clientsFile = fileURLToPath(new URL('../.data/google-clients.json', import.meta.url)),
+    file = fileURLToPath(new URL('../.data/google-accounts.json', import.meta.url)),
+    clientsFile = fileURLToPath(new URL('../.data/google-clients.json', import.meta.url)),
   ) {
-    this.grants = readStore<GoogleGrant>(file, 'account store');
-    this.clients = readStore<StoredClient>(clientsFile, 'OAuth client store');
+    this.grants = new JsonStore<GoogleGrant>(file, 'account links', isGrant);
+    this.clients = new JsonStore<StoredClient>(clientsFile, 'OAuth client settings', isStoredClient);
   }
 
   /** The OAuth client this workspace signs in with: its own from Settings, else the server default. */
   private clientFor(tenantId: string): OAuthClient | null {
-    const own = this.clients[tenantId];
+    const own = this.clients.data[tenantId];
     if (own) return own;
     const { GOOGLE_CLIENT_ID: clientId, GOOGLE_CLIENT_SECRET: clientSecret } = process.env;
     return clientId && clientSecret ? { clientId, clientSecret } : null;
@@ -268,20 +324,21 @@ export class GoogleAccounts {
   /** The workspace's grant, if it was issued to the OAuth client the workspace uses now (tokens from
    *  another client can't be refreshed with this one). */
   private liveGrant(tenantId: string): GoogleGrant | undefined {
-    const g = this.grants[tenantId];
+    const g = this.grants.data[tenantId];
     const client = this.clientFor(tenantId);
     if (!g || !client) return undefined;
     return !g.clientId || g.clientId === client.clientId ? g : undefined;
   }
 
   clientSettings(tenantId: string): GoogleClientSettings {
-    const own = this.clients[tenantId];
+    const own = this.clients.data[tenantId];
     return {
       source: own ? 'workspace' : this.clientFor(tenantId) ? 'server' : 'none',
       clientId: own?.clientId ?? '',
       secretHint: own ? own.clientSecret.slice(-4) : null,
       updatedBy: own?.updatedBy ?? null,
       updatedAt: own?.updatedAt ?? null,
+      problem: this.clients.locked || this.grants.locked ? "Whaser couldn't read its saved Google settings, so changes can't be saved right now. An admin needs to check the server log." : null,
     };
   }
 
@@ -291,15 +348,14 @@ export class GoogleAccounts {
   async setClient(tenantId: string, username: string, input: { clientId?: unknown; clientSecret?: unknown }, redirectUri: string): Promise<{ verified: boolean }> {
     const clientId = String(input.clientId ?? '').trim();
     if (!CLIENT_ID_RE.test(clientId)) throw new Error("That doesn't look like a Google OAuth client ID — it ends with .apps.googleusercontent.com.");
-    const prev = this.clients[tenantId];
+    const prev = this.clients.data[tenantId];
     const clientSecret = String(input.clientSecret ?? '').trim() || (prev?.clientId === clientId ? prev.clientSecret : '');
     if (!clientSecret) throw new Error('Enter the client secret.');
     if (/\s/.test(clientSecret) || clientSecret.length > 200) throw new Error("That doesn't look like a Google client secret.");
     const check = await verifyClient({ clientId, clientSecret }, redirectUri);
     if (check === 'invalid') throw new Error('Google rejected this client ID and secret. Check that both were copied from the same OAuth client.');
     const before = this.clientFor(tenantId)?.clientId;
-    this.clients[tenantId] = { clientId, clientSecret, updatedBy: username, updatedAt: Date.now() };
-    writeStore(this.clientsFile, this.clients, 'OAuth client store');
+    this.clients.save({ ...this.clients.data, [tenantId]: { clientId, clientSecret, updatedBy: username, updatedAt: Date.now() } });
     if (before !== clientId) await this.disconnect(tenantId);
     return { verified: check === 'ok' };
   }
@@ -308,9 +364,8 @@ export class GoogleAccounts {
    *  account is unlinked when that changes the client its tokens belong to. */
   async removeClient(tenantId: string): Promise<void> {
     const before = this.clientFor(tenantId)?.clientId;
-    if (!this.clients[tenantId]) return;
-    delete this.clients[tenantId];
-    writeStore(this.clientsFile, this.clients, 'OAuth client store');
+    if (!this.clients.data[tenantId]) return;
+    this.clients.save(without(this.clients.data, tenantId));
     if (this.clientFor(tenantId)?.clientId !== before) await this.disconnect(tenantId);
   }
 
@@ -370,7 +425,7 @@ export class GoogleAccounts {
     const prev = this.liveGrant(p.tenantId);
     const refreshToken = tok.refresh_token || prev?.refreshToken;
     if (!tok.access_token || !refreshToken) throw new Error('Google did not return usable tokens. Please try connecting again.');
-    this.grants[p.tenantId] = {
+    const grant: GoogleGrant = {
       clientId: client.clientId,
       email: emailFromIdToken(tok.id_token) ?? prev?.email ?? null,
       connectedBy: p.username,
@@ -380,7 +435,7 @@ export class GoogleAccounts {
       expiresAt: Date.now() + (Number(tok.expires_in) || 3600) * 1000,
       scopes: String(tok.scope ?? '').split(/\s+/).filter(Boolean),
     };
-    this.save();
+    this.grants.save({ ...this.grants.data, [p.tenantId]: grant });
     return { tenantId: p.tenantId };
   }
 
@@ -391,10 +446,9 @@ export class GoogleAccounts {
 
   /** Unlink: revoke the grant at Google (best effort) and forget the tokens. */
   async disconnect(tenantId: string): Promise<void> {
-    const g = this.grants[tenantId];
+    const g = this.grants.data[tenantId];
     if (!g) return;
-    delete this.grants[tenantId];
-    this.save();
+    this.grants.save(without(this.grants.data, tenantId));
     try {
       await fetch(REVOKE_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: g.refreshToken }), signal: AbortSignal.timeout(10_000) });
     } catch {
@@ -407,7 +461,7 @@ export class GoogleAccounts {
     const token = await this.accessToken(tenantId);
     const res = await fetch(url, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) });
     if (res.status === 401 && retry) {
-      const g = this.grants[tenantId];
+      const g = this.grants.data[tenantId];
       if (g) g.expiresAt = 0; // force a refresh, then try once more
       return this.request(tenantId, url, init, false);
     }
@@ -443,9 +497,8 @@ export class GoogleAccounts {
       tok = await this.tokenRequest(client, { grant_type: 'refresh_token', refresh_token: g.refreshToken });
     } catch (e) {
       // invalid_grant = the owner revoked access (or it expired): forget it so the UI offers to reconnect.
-      if (e instanceof Error && /invalid_grant/.test(e.message) && this.grants[tenantId] === g) {
-        delete this.grants[tenantId];
-        this.save();
+      if (e instanceof Error && /invalid_grant/.test(e.message) && this.grants.data[tenantId] === g) {
+        this.saveQuietly(without(this.grants.data, tenantId));
         throw new GoogleNotConnectedError('revoked');
       }
       throw e;
@@ -455,7 +508,7 @@ export class GoogleAccounts {
     g.expiresAt = Date.now() + (Number(tok.expires_in) || 3600) * 1000;
     if (tok.scope) g.scopes = tok.scope.split(/\s+/).filter(Boolean);
     if (tok.refresh_token) g.refreshToken = tok.refresh_token;
-    this.save();
+    this.saveQuietly(); // the refreshed token is already in memory; a failed write must not fail this call
     return g.accessToken;
   }
 
@@ -471,8 +524,13 @@ export class GoogleAccounts {
     return data;
   }
 
-  private save(): void {
-    writeStore(this.file, this.grants, 'account store');
+  /** Persist the account links from a background path (token refresh) — logged, never thrown. */
+  private saveQuietly(next?: Record<string, GoogleGrant>): void {
+    try {
+      this.grants.save(next);
+    } catch (e) {
+      console.error('[google]', e instanceof Error ? e.message : e);
+    }
   }
 }
 
