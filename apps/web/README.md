@@ -50,6 +50,48 @@ PORT=8080 npm start
 
 Nothing else changes — same GUI, same code paths, now backed by Claude.
 
+## Connect Google (Gmail, Calendar, Drive)
+
+When you create an agent, the publish step lets you give it **Gmail**, **Google Calendar** and
+**Google Drive** connections, each **Read only** or **Read & write** (also editable later from the
+agent page → **🔗 Google connections**). The agent then gets real tools for what you ticked:
+
+| Service | Read | Read & write adds |
+|---|---|---|
+| Gmail | search, read emails | send (incl. threaded replies), save drafts, mark read/unread, archive, star |
+| Google Calendar | list events / check availability | create, update, delete events (attendees are notified) |
+| Google Drive | search, read files (Docs, Sheets as CSV, Slides, text; folders list their files) | create Docs/Sheets/text files, replace a file's content, rename |
+
+Each workspace links **one** Google account (OAuth pop-up; tokens are stored in the gitignored
+`.data/google-accounts.json`, owner-only permissions), and every agent in the workspace can opt into it.
+Writes are simulated during the improve chat's test runs. The agent page warns when an agent's
+connections aren't granted by the linked account yet.
+
+> ⚠️ Anyone who can message an agent can ask it to use its connections — with Gmail **Read & write**
+> that includes sending email as you. Grant write access only to agents that need it.
+
+Setup (once per server):
+
+1. In [Google Cloud Console](https://console.cloud.google.com/) create a project, enable the
+   **Gmail API**, **Google Calendar API** and **Google Drive API**, and configure the OAuth consent
+   screen (while it's in *Testing*, add your Google accounts as test users).
+2. Create an **OAuth client ID** of type *Web application* and add the redirect URI
+   `https://<your-domain>/api/google/callback`. Google only accepts `https://` redirect URIs on a real
+   domain — or `http://localhost:<port>/api/google/callback` for local use (e.g. through an SSH tunnel).
+   Raw IP addresses are rejected.
+3. Add to `apps/web/.env` and restart:
+
+   ```bash
+   GOOGLE_CLIENT_ID=1234-abc.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=GOCSPX-...
+   # optional — otherwise derived from the URL the app is opened at (honours X-Forwarded-Proto/Host)
+   GOOGLE_REDIRECT_URI=https://whaser.example.com/api/google/callback
+   ```
+
+Scopes requested: `gmail.readonly` / `gmail.modify`, `calendar.events.readonly` / `calendar.events`,
+`drive.readonly` / `drive` (read / read & write). The Gmail and Drive scopes are Google *restricted*
+scopes (Calendar's are *sensitive*) — fine for test users, but a public app needs Google's verification.
+
 ## Going to full production (LibreChat fork)
 
 The demo's direct Claude runtime is the `@anthropic-ai/sdk` fallback path. For the full system,
