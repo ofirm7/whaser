@@ -1,4 +1,4 @@
-import makeWASocket, { useMultiFileAuthState, DisconnectReason, downloadMediaMessage, getBinaryNodeChild } from '@whiskeysockets/baileys';
+import makeWASocket, { useMultiFileAuthState, DisconnectReason, downloadMediaMessage, getBinaryNodeChild, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -35,9 +35,33 @@ export interface ChatEntry {
   ts: number; // last-activity, ms since epoch (0 = unknown)
 }
 
+/**
+ * The WhatsApp web version to advertise. A pinned Baileys build bakes in the version that was
+ * current when it was released, and WhatsApp starts rejecting it within weeks: the pairing socket
+ * is closed with a bare `405 Connection Failure` a few seconds in, BEFORE any QR is emitted, so the
+ * link screen just sits there with no QR and no error. Resolve the live version instead (cached per
+ * process, re-checked every 6h), and fall back to the bundled default if the lookup fails.
+ */
+let waVersion: [number, number, number] | null = null;
+let waVersionAt = 0;
+async function resolveWaVersion(): Promise<[number, number, number] | undefined> {
+  if (waVersion && Date.now() - waVersionAt < 6 * 60 * 60 * 1000) return waVersion;
+  try {
+    const { version } = await fetchLatestBaileysVersion();
+    waVersion = version as [number, number, number];
+    waVersionAt = Date.now();
+    console.log('[baileys] advertising WhatsApp web version', waVersion.join('.'));
+    return waVersion;
+  } catch (e) {
+    console.warn('[baileys] could not look up the current WhatsApp web version; using the version bundled with Baileys (pairing may be rejected with 405):', e instanceof Error ? e.message : e);
+    return waVersion ?? undefined;
+  }
+}
+
 export class BaileysChannel {
   private sock: any = null;
   private starting = false;
+  private retries = 0; // consecutive failed connects — drives the reconnect backoff
   private status: LinkStatus = 'disconnected';
   private qrDataUrl: string | null = null;
   private me: string | null = null;
@@ -311,8 +335,10 @@ export class BaileysChannel {
     this.starting = true;
     this.status = 'connecting';
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+    const version = await resolveWaVersion();
     const sock = makeWASocket({
       auth: state,
+      version, // must be the LIVE version or WhatsApp 405s the handshake before sending a QR
       logger: silentLogger,
       browser: ['Whaser', 'Chrome', '1.0'],
       // Fetch only the recent slice (fast) — the picker shows the last 100 chats, newest first.
@@ -351,6 +377,7 @@ export class BaileysChannel {
       }
       if (u.connection === 'open') {
         this.status = 'connected';
+        this.retries = 0;
         this.qrDataUrl = null;
         this.photoCache.clear(); // drop possibly-expired signed URLs on a fresh connection
         this.me = sock.user?.id ? String(sock.user.id).split(':')[0].split('@')[0] : null;
@@ -368,8 +395,13 @@ export class BaileysChannel {
           this.me = null;
           this.qrDataUrl = null;
         } else {
+          // Anything else (405 on an outdated client, a network blip, a server-side close) used to
+          // re-enter start() immediately — a silent hot loop that reconnected every few seconds
+          // forever and never told anyone why the QR wasn't coming. Back off and say so.
           this.status = 'connecting';
-          void this.start();
+          const wait = Math.min(60_000, 2_000 * 2 ** Math.min(this.retries++, 5));
+          console.warn(`[baileys] ${this.slug}: connection closed (code ${code ?? 'unknown'}: ${u.lastDisconnect?.error?.message ?? 'no message'}) — retry ${this.retries} in ${Math.round(wait / 1000)}s`);
+          setTimeout(() => { void this.start().catch((e) => console.error('[baileys] reconnect', this.slug, e)); }, wait);
         }
       }
     });

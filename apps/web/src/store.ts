@@ -1030,8 +1030,13 @@ export class AppState {
     };
     this.agents.set(agent.id, agent);
     this.resolver.bind(agent.phoneNumberId, { agentId: agent.id, tenantId: agent.tenantId });
-    this.provisionToolsFor(agent); // auto-create disabled triggers for recurring capabilities
-    this.persist();
+    // Invariant: an agent that is in the map is on disk. Trigger provisioning is best-effort —
+    // it must never be able to leave a published agent unpersisted (it would vanish on restart).
+    try {
+      this.provisionToolsFor(agent); // auto-create disabled triggers for recurring capabilities
+    } finally {
+      this.persist();
+    }
     return agent;
   }
 
@@ -1089,17 +1094,21 @@ export class AppState {
     };
     this.agents.set(agent.id, agent);
     this.resolver.bind(agent.phoneNumberId, { agentId: agent.id, tenantId });
-    this.provisionToolsFor(agent); // auto-create disabled triggers for recurring capabilities
-    // Seed any catalog-shipped scheduled triggers (e.g. an hourly "post the latest updates" digest).
-    // Disabled by default so deploying never starts billing/fan-out until the owner flips it Active.
-    for (const t of entry.triggers ?? []) {
-      try {
-        this.addTrigger(agent.id, tenantId, {
-          label: t.label, prompt: t.prompt, value: t.value, unit: t.unit, enabled: t.enabled === true,
-        });
-      } catch { /* a malformed seed trigger never blocks the deploy */ }
+    // Same invariant as publish(): whatever trigger provisioning does, the agent reaches disk.
+    try {
+      this.provisionToolsFor(agent); // auto-create disabled triggers for recurring capabilities
+      // Seed any catalog-shipped scheduled triggers (e.g. an hourly "post the latest updates" digest).
+      // Disabled by default so deploying never starts billing/fan-out until the owner flips it Active.
+      for (const t of entry.triggers ?? []) {
+        try {
+          this.addTrigger(agent.id, tenantId, {
+            label: t.label, prompt: t.prompt, value: t.value, unit: t.unit, enabled: t.enabled === true,
+          });
+        } catch { /* a malformed seed trigger never blocks the deploy */ }
+      }
+    } finally {
+      this.persist();
     }
-    this.persist();
     return agent;
   }
 
