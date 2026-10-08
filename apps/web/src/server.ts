@@ -32,6 +32,9 @@ const wrap =
       return;
     }
     fn(req, res, auth).catch((err: unknown) => {
+      // Log it: an API failure that only ever reached the browser leaves no trace of why, say, a
+      // freshly designed agent never got published.
+      console.error(`[api] ${req.method} ${req.path} (${auth.username}/${auth.tenantId}):`, err);
       if (!res.headersSent) res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     });
   };
@@ -190,10 +193,11 @@ app.post('/api/wizard/select-chats', wrap(async (req, res, auth) => {
   const list = (Array.isArray(chats) ? chats : [])
     .filter((c) => c && typeof c.id === 'string' && typeof c.name === 'string')
     .map((c) => ({ id: String(c.id), name: String(c.name) }));
-  if (!list.length) {
-    res.status(400).json({ error: 'Select at least one chat.' });
-    return;
-  }
+  // An EMPTY selection is legitimate and must stay that way: a brand-new user has no WhatsApp link
+  // yet, so there are no chats to pick — and gating this on a non-empty list is exactly what made a
+  // freshly designed agent impossible to publish (it only ever existed in the wizard session, so it
+  // "vanished" the moment the page was left). Chats are bound later via POST /api/agents/:id/chats,
+  // which has always accepted an empty list.
   session.selectedChats = list;
   res.json({ selected: list.length, listenChats: list });
 }));
