@@ -79,6 +79,7 @@
   .modal.wide { width:560px; }
   .modal.modal-xl { width:94vw; max-width:1150px; }
   .modal.modal-xl .chat { height:68vh !important; }
+  .update-bar { position:fixed; inset-inline:0; bottom:0; z-index:2000; display:flex; gap:12px; align-items:center; justify-content:center; flex-wrap:wrap; padding:10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); background:var(--panel2); border-top:1px solid var(--accent); box-shadow:0 -6px 20px rgba(0,0,0,.4); }
 </style>
 </head>
 <body>
@@ -330,6 +331,8 @@ const I18N = { he: {
     "Remove": "הסרה",
     "Saving…": "שומר…",
     "Close": "סגירה",
+    "Whaser was updated.": "Whaser עודכן.",
+    "Reload": "טעינה מחדש",
     "👥 Join a group": "👥 הצטרפות לקבוצה",
     "👥 Add to a WhatsApp group": "👥 הוספה לקבוצת WhatsApp",
     "Paste the group's invite link (in WhatsApp: group info → Invite via link). Your linked WhatsApp joins the group, and the agent answers there.": "הדביקו את קישור ההזמנה של הקבוצה (ב-WhatsApp: פרטי הקבוצה ← הזמנה באמצעות קישור). ה-WhatsApp המקושר שלכם יצטרף לקבוצה, והסוכן יענה שם.",
@@ -410,8 +413,34 @@ function langSelect(){ return `<select class="lang" title="${t('Language')}" ari
 function wireLang(el){ const s = el.querySelector('.lang'); if (s) s.onchange = (e)=> setLang(e.target.value); }
 applyDir();
 
+// Auto-update: the server stamps the page with its UI version and names the live one on every response
+// (X-Whaser-Version). When they differ a new version was deployed, so the page reloads into it — unless
+// someone is typing or a dialog is open; then a "Reload" bar is offered instead. At most one automatic
+// reload per version (sessionStorage), so a stale cache can never cause a reload loop. Idle tabs check
+// once a minute and whenever they're shown again.
+const UI_VERSION = document.querySelector('meta[name="whaser-version"]')?.content || null;
+let updateOffered = false;
+function noteServerVersion(live){
+  if (!UI_VERSION || !live || live === UI_VERSION || updateOffered) return;
+  let tried = null; try{ tried = sessionStorage.getItem('whaser_reloaded_for'); }catch{}
+  const el = document.activeElement;
+  const typing = !!el && /^(INPUT|TEXTAREA)$/.test(el.tagName) && !!el.value;
+  if (tried !== live && !typing && !_openDialogs.size){
+    try{ sessionStorage.setItem('whaser_reloaded_for', live); }catch{}
+    updateOffered = true; location.reload(); return;
+  }
+  updateOffered = true;
+  const bar = $(`<div class="update-bar" role="status"><span>${t('Whaser was updated.')}</span><button class="primary">${t('Reload')}</button></div>`);
+  bar.querySelector('button').onclick = ()=> location.reload();
+  document.body.appendChild(bar);
+}
+async function checkForUpdate(){ try{ const r = await fetch('/healthz', { cache:'no-store' }); noteServerVersion(r.headers.get('x-whaser-version')); }catch{ /* offline — try later */ } }
+setInterval(checkForUpdate, 60000);
+document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState === 'visible') checkForUpdate(); });
+
 async function api(path, method='GET', body){
   const r = await fetch(path, { method, headers:{ 'content-type':'application/json', ...(token?{authorization:'Bearer '+token}:{}) }, body: body?JSON.stringify(body):undefined });
+  noteServerVersion(r.headers.get('x-whaser-version'));
   // A 401 on the auth endpoints means "wrong credentials" — let the login form show it inline,
   // don't treat it as an expired session (which would wipe the form via logout()+render()).
   if (r.status === 401 && !/^\/api\/(login|register)\b/.test(path)){ logout(); throw new Error(t('Session expired — please log in.')); }
