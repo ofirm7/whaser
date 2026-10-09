@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacy Policy — Whaser</title>
+<meta name="description" content="How Whaser collects, uses, stores and shares information, including data from your Google account." />
+<link rel="canonical" href="{{SITE}}/privacy" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2300a884'/%3E%3Cpath d='M9.5 9h13A3.5 3.5 0 0 1 26 12.5v6a3.5 3.5 0 0 1-3.5 3.5H16l-5 4v-4H9.5A3.5 3.5 0 0 1 6 18.5v-6A3.5 3.5 0 0 1 9.5 9z' fill='%2304231c'/%3E%3C/svg%3E" />
+<style>
+  :root { --bg:#0b141a; --panel:#111b21; --panel2:#202c33; --line:#2a3942; --text:#e9edef; --muted:#8696a0; --accent:#00a884; --accent2:#06cf9c; --body:#c5cfd4; }
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  html { scroll-behavior:smooth; }
+  body { margin:0; font:16px/1.65 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); }
+  a { color:var(--accent2); }
+  .wrap { max-width:1080px; margin:0 auto; padding-inline:20px; }
+  .top { position:sticky; top:0; z-index:10; background:rgba(11,20,26,.88); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-bottom:1px solid rgba(42,57,66,.6); }
+  .bar { display:flex; align-items:center; gap:16px; height:64px; }
+  .brand { display:inline-flex; align-items:center; gap:10px; font-weight:700; font-size:20px; color:var(--text); text-decoration:none; }
+  .brand svg { width:30px; height:30px; flex:none; }
+  .actions { display:flex; gap:10px; margin-inline-start:auto; }
+  .btn { display:inline-flex; align-items:center; padding:9px 16px; border-radius:10px; border:1px solid var(--line); background:transparent; color:var(--text); font-weight:600; font-size:15px; text-decoration:none; white-space:nowrap; }
+  .btn:hover { border-color:var(--muted); }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#04231c; }
+
+  article { max-width:760px; margin:0 auto; padding:48px 20px 72px; }
+  h1 { font-size:clamp(32px,5vw,42px); letter-spacing:-.02em; line-height:1.1; margin:0 0 8px; }
+  .date { color:var(--muted); margin:0 0 28px; }
+  h2 { font-size:24px; letter-spacing:-.01em; line-height:1.25; margin:48px 0 12px; padding-top:8px; scroll-margin-top:80px; }
+  h3 { font-size:18px; margin:30px 0 8px; scroll-margin-top:80px; }
+  p, li { color:var(--body); }
+  p { margin:0 0 14px; }
+  ul { margin:0 0 16px; padding-inline-start:22px; }
+  li { margin:6px 0; }
+  strong { color:var(--text); }
+  code { font:13.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:1px 6px; color:var(--text); white-space:nowrap; }
+  .summary { background:var(--panel); border:1px solid var(--line); border-inline-start:3px solid var(--accent); border-radius:12px; padding:18px 22px; margin:0 0 30px; }
+  .summary h2 { margin:0 0 8px; padding:0; font-size:18px; }
+  .summary ul { margin:0; }
+  .toc { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 22px; margin:0 0 8px; }
+  .toc b { display:block; margin-bottom:6px; }
+  .toc ol { margin:0; padding-inline-start:22px; columns:2; column-gap:28px; }
+  .toc li { margin:3px 0; break-inside:avoid; }
+  .toc a { color:var(--body); text-decoration:none; }
+  .toc a:hover { color:var(--accent2); }
+  .table { width:100%; border-collapse:collapse; margin:8px 0 18px; font-size:15px; }
+  .table th, .table td { text-align:start; vertical-align:top; padding:10px 12px; border-bottom:1px solid var(--line); }
+  .table th { color:var(--text); font-size:13px; text-transform:uppercase; letter-spacing:.04em; background:var(--panel); }
+  .table td { color:var(--body); }
+  .limited { border:1px solid var(--line); border-inline-start:3px solid var(--accent); border-radius:10px; padding:14px 16px; background:var(--panel); }
+  footer { border-top:1px solid var(--line); padding:28px 0 40px; color:var(--muted); font-size:14px; }
+  footer .row { display:flex; flex-wrap:wrap; gap:10px 22px; }
+  footer a { color:var(--muted); }
+  @media (max-width:640px) {
+    .wrap, article { padding-inline:16px; }
+    .toc ol { columns:1; }
+    .table thead { display:none; }
+    .table, .table tbody, .table tr, .table td { display:block; width:100%; }
+    .table tr { border-bottom:1px solid var(--line); padding:8px 0; }
+    .table td { border:none; padding:3px 0; }
+    .table td:first-child { color:var(--text); font-weight:600; }
+    #start { display:none; }
+  }
+</style>
+</head>
+<body>
+<!--
+  Whaser's privacy policy (served at /privacy). Google's app verification reads it, so it must describe
+  what the code actually does. Before shipping a change in how Whaser collects, keeps or shares data
+  (e.g. turning personal WhatsApp linking back on, storing conversations on disk, a new service
+  provider, new Google scopes), update this page and its effective date first.
+-->
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="/" aria-label="Whaser home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#00a884"/><path d="M9.5 9h13A3.5 3.5 0 0 1 26 12.5v6a3.5 3.5 0 0 1-3.5 3.5H16l-5 4v-4H9.5A3.5 3.5 0 0 1 6 18.5v-6A3.5 3.5 0 0 1 9.5 9z" fill="#04231c"/><circle cx="11.5" cy="15.5" r="1.6" fill="#06cf9c"/><circle cx="16" cy="15.5" r="1.6" fill="#06cf9c"/><circle cx="20.5" cy="15.5" r="1.6" fill="#06cf9c"/></svg>
+      Whaser
+    </a>
+    <div class="actions">
+      <a class="btn" id="login" href="/app">Log in</a>
+      <a class="btn primary" id="start" href="/app?signup">Get started</a>
+    </div>
+  </div>
+</header>
+
+<article>
+  <h1>Privacy Policy</h1>
+  <p class="date">Effective date: October 9, 2026</p>
+
+  <p>Whaser (<a href="{{SITE}}/">whaser.site</a>) lets businesses create AI agents that answer messages on WhatsApp. This policy explains what information Whaser collects, how we use it, how we store it, who we share it with, and the choices you have.</p>
+  <p>In this policy, "Whaser", "we" and "us" mean the operator of the Whaser service. "You" means a person who signs up to Whaser to build and run agents. "Customers" means the people who message a business's Whaser agent on WhatsApp.</p>
+
+  <div class="summary">
+    <h2>In short</h2>
+    <ul>
+      <li>We use your information only to run Whaser for you: to build your agents, let them answer your customers, and show you what they did.</li>
+      <li>Connecting a Google account is optional. If you do, your agents use your Gmail, Calendar or Drive only as you allow and only while doing a task for you. We don't keep copies of what they read.</li>
+      <li>We don't sell personal information, show ads, or use your data or your customers' messages to train AI models.</li>
+      <li>You can disconnect Google at any time and ask us to delete your account.</li>
+    </ul>
+  </div>
+
+  <nav class="toc" aria-label="Contents">
+    <b>Contents</b>
+    <ol>
+      <li><a href="#collect">Information we collect</a></li>
+      <li><a href="#google">Google user data</a></li>
+      <li><a href="#use">How we use information</a></li>
+      <li><a href="#share">Who we share it with</a></li>
+      <li><a href="#retention">How long we keep it</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#rights">Your rights and choices</a></li>
+      <li><a href="#children">Children</a></li>
+      <li><a href="#changes">Changes to this policy</a></li>
+      <li><a href="#contact">Contact us</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="collect">1. Information we collect</h2>
+  <p><strong>Account information.</strong> When you sign up we collect a username, a display name and a password. Your password is stored only as a salted cryptographic hash, never in readable form. Each account gets its own workspace.</p>
+  <p><strong>Your agents.</strong> The conversation you have with Whaser's agent builder, and the instructions, settings, connections and scheduled actions that make up each of your agents.</p>
+  <p><strong>Messages your agents handle.</strong> When customers message one of your agents on WhatsApp, we receive their messages (text, and any images, documents or other files they send), their WhatsApp phone number and, when WhatsApp provides it, their profile name, along with your agent's replies. Messages you send your agents in Whaser's test chats are handled the same way.</p>
+  <p><strong>Google account data.</strong> Only if you connect a Google account. <a href="#google">Section 2</a> explains exactly what we access and how we use it.</p>
+  <p><strong>Usage and billing.</strong> How many AI requests each agent makes and what they cost, and your workspace's credit balance. We don't collect payment card details.</p>
+  <p><strong>Technical data.</strong> Our servers record technical events such as errors, which can include your username, your workspace and your IP address. We use them to keep Whaser running and secure.</p>
+  <p><strong>Browser storage and cookies.</strong> The Whaser app keeps your sign-in session, your name and your language choice in your browser's local storage. During Google sign-in we set one short-lived cookie, which expires after 10 minutes and protects the sign-in from forgery. We don't use advertising or third-party analytics cookies.</p>
+
+  <h2 id="google">2. Google user data</h2>
+  <p>This section describes how Whaser accesses, uses, stores and shares data from your Google account. It applies only if someone in your workspace chooses to connect a Google account in Whaser, with "Sign in with Google" under Settings → Connected accounts or when giving an agent a Google connection.</p>
+
+  <h3 id="google-access">What we access</h3>
+  <p>Google shows its own consent screen listing what Whaser asks for, and you can approve or decline. We ask only for the services and access levels you choose for your agents:</p>
+  <table class="table">
+    <thead><tr><th>Access</th><th>Google permission</th><th>Why Whaser needs it</th></tr></thead>
+    <tbody>
+      <tr><td>Your Google account's email address</td><td><code>openid</code> <code>email</code></td><td>To show which Google account is connected.</td></tr>
+      <tr><td>Gmail: read</td><td><code>gmail.readonly</code></td><td>So an agent can search and read the emails it needs to answer a customer, such as an order confirmation.</td></tr>
+      <tr><td>Gmail: read &amp; write</td><td><code>gmail.modify</code></td><td>In addition, so an agent can send emails and replies, save drafts, and mark messages read or unread, archive or star them, when its task calls for it.</td></tr>
+      <tr><td>Google Calendar: read</td><td><code>calendar.events.readonly</code></td><td>So an agent can check your events and when you're free.</td></tr>
+      <tr><td>Google Calendar: read &amp; write</td><td><code>calendar.events</code></td><td>In addition, so an agent can create, change or cancel events, such as booking an appointment. Google notifies the event's guests.</td></tr>
+      <tr><td>Google Drive: read</td><td><code>drive.readonly</code></td><td>So an agent can find and read files you keep in Drive, such as a price list or a menu (documents, spreadsheets, presentations and text files).</td></tr>
+      <tr><td>Google Drive: read &amp; write</td><td><code>drive</code></td><td>In addition, so an agent can create documents, spreadsheets and text files, and update or rename files.</td></tr>
+    </tbody>
+  </table>
+  <p>You can allow more later, and Google asks you again each time. Each agent uses only the Google services you turn on for it on its page in Whaser.</p>
+
+  <h3 id="google-use">How we use it</h3>
+  <p>We use Google user data only to provide the features you turn on for your agents, and only when an agent needs it: while it answers a message, or runs a scheduled action you set up. For example, when a customer asks for an appointment, an agent with Calendar access checks your free times and books the slot. Whaser doesn't scan, copy or index your mailbox, calendar or Drive in the background.</p>
+  <p>We don't sell Google user data, and we don't use it:</p>
+  <ul>
+    <li>to serve advertisements, including personalized, retargeted or interest-based ads;</li>
+    <li>to develop, improve or train generalized artificial intelligence or machine-learning models, ours or anyone else's;</li>
+    <li>to determine creditworthiness or for lending purposes;</li>
+    <li>for anything other than providing the Whaser features you use.</li>
+  </ul>
+  <p>No one at Whaser reads your Google data, unless (a) you ask us to and agree to it for specific messages, events or files, for example to help with a support request; (b) it's necessary for security purposes, such as investigating abuse; (c) it's required to comply with applicable law; or (d) it's aggregated and anonymized and used for Whaser's internal operations.</p>
+
+  <h3 id="google-storage">How we store it</h3>
+  <ul>
+    <li><strong>Access keys.</strong> So your agents can reach what you allowed, we store the access and refresh tokens Google issues, with the connected account's email address and the permissions granted. They are kept on Whaser's server in a file that only the Whaser service can read.</li>
+    <li><strong>No copies of your content.</strong> Whaser doesn't save copies of your emails, events or files. When an agent reads something from your Google account, it uses it while writing that one reply and then discards it. Only the reply is kept as part of the conversation (see <a href="#retention">section 5</a>). The reply may include details from your Google data, such as an available time.</li>
+    <li>All data travels encrypted (HTTPS) between Whaser, Google and our AI provider.</li>
+  </ul>
+
+  <h3 id="google-sharing">How we share it</h3>
+  <p>Only as needed to do what you set your agents up to do:</p>
+  <ul>
+    <li><strong>With our AI provider, Anthropic.</strong> Whaser's agents run on Anthropic's Claude models, so the Google data an agent reads is sent to Anthropic for the agent to understand it and write its reply. Anthropic processes it on our behalf and, under its commercial terms, doesn't use it to train its models.</li>
+    <li><strong>With the people your agent talks to.</strong> An agent's replies can include information from your Google account when your instructions and the customer's request call for it, for example which times are free. Anyone who can message an agent can ask it to use the connections you gave it, so connect only what each agent needs.</li>
+    <li><strong>When required by law,</strong> or to protect the rights, safety and security of Whaser, our users or the public.</li>
+    <li><strong>In a business transfer,</strong> such as a merger or acquisition, only after we get your explicit prior consent.</li>
+  </ul>
+  <p>We don't transfer Google user data to anyone else.</p>
+
+  <h3 id="google-controls">Your controls</h3>
+  <ul>
+    <li><strong>Disconnect</strong> at any time in Whaser under Settings → Connected accounts → Disconnect Google. We delete the stored tokens immediately and ask Google to revoke Whaser's access.</li>
+    <li>You can also remove Whaser's access in your Google Account at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</li>
+    <li>Choose which of your agents may use which Google services, on each agent's page.</li>
+  </ul>
+
+  <h3 id="limited-use">Limited Use</h3>
+  <p class="limited">Whaser's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
+  <h2 id="use">3. How we use information</h2>
+  <p>We use the information described above to:</p>
+  <ul>
+    <li>build and run your agents, including sending their replies on WhatsApp;</li>
+    <li>show you your agents' recent activity, conversations, usage and balance;</li>
+    <li>suggest improvements to an agent when you ask for them, based on that agent's recent conversations;</li>
+    <li>keep Whaser secure and reliable, including rate limits, spending limits and preventing abuse;</li>
+    <li>answer your requests and tell you about changes to the service;</li>
+    <li>comply with the law.</li>
+  </ul>
+  <p>We don't use your data or your customers' messages to train AI models, and we don't sell personal information or use it for advertising.</p>
+
+  <h2 id="share">4. Who we share it with</h2>
+  <p>We share information with service providers that help us run Whaser, only for that purpose:</p>
+  <ul>
+    <li><strong>Anthropic</strong> provides the AI models (Claude) that power the agent builder and your agents. It receives your agents' instructions, the conversations they handle, and the data agents use from services you connect.</li>
+    <li><strong>Twilio</strong> sends and receives WhatsApp messages for business numbers. It receives customers' messages and phone numbers, and your agents' replies.</li>
+    <li><strong>WhatsApp (Meta)</strong> carries the messages over its network, under WhatsApp's own terms.</li>
+    <li><strong>Akamai (Linode)</strong> hosts the servers that run Whaser and store its data.</li>
+    <li><strong>Google</strong> receives requests only if you connect a Google account, to carry out what your agents do there.</li>
+    <li><strong>Web search.</strong> When an agent looks something up on the web, its search terms go to the search service and to the websites it reads.</li>
+  </ul>
+  <p>Your workspace's agents, conversations and connections are visible only to members of your workspace. We may also disclose information when required by law, or to protect the rights, safety and security of Whaser, our users or the public. If Whaser is part of a merger or acquisition, information may transfer to the new operator under this policy (for Google user data, only with your consent as described above). We don't sell or rent personal information.</p>
+  <p>Our providers may process information in the United States and other countries.</p>
+
+  <h2 id="retention">5. How long we keep it</h2>
+  <ul>
+    <li><strong>Your account and agents:</strong> while your account exists. When you ask us to delete your account, we delete them within 30 days.</li>
+    <li><strong>Conversations and the activity log:</strong> kept so an agent can follow a conversation and you can review recent activity. They are held in our server's memory, not archived to long-term storage, and are cleared whenever the service restarts.</li>
+    <li><strong>Google access keys:</strong> until you disconnect, or Google revokes or expires the access. Content from your Google account isn't stored (see <a href="#google-storage">How we store it</a>).</li>
+    <li><strong>Usage records and balance:</strong> while your account exists.</li>
+    <li><strong>Technical logs:</strong> for a limited time, for troubleshooting and security.</li>
+  </ul>
+  <p>Twilio and WhatsApp keep their own records of messages, under their own policies.</p>
+
+  <h2 id="security">6. Security</h2>
+  <p>Connections to Whaser are encrypted with HTTPS. Passwords are stored only as salted hashes, workspaces are kept separate from each other, Google access keys are readable only by the Whaser service, and access to our servers is restricted. No system is perfectly secure; if a breach affects your information, we'll notify you as the law requires.</p>
+
+  <h2 id="rights">7. Your rights and choices</h2>
+  <p>You can ask us to access, correct, export or delete your personal information, or to restrict or object to how we use it. Depending on where you live, for example under the EU or UK GDPR, Israel's Protection of Privacy Law or California law, you may have further rights, including the right to complain to your data protection authority. Contact us<!--if:contact--> at <a href="mailto:{{CONTACT}}">{{CONTACT}}</a><!--/if:contact--> and we'll reply within 30 days.</p>
+  <p>If you messaged a business's agent: the business decides how its agent uses your messages, so please contact the business first. We'll help it respond to your request. You can stop at any time by no longer messaging the agent or by blocking its number in WhatsApp.</p>
+
+  <h2 id="children">8. Children</h2>
+  <p>Whaser is a tool for businesses and isn't directed at children under 16. We don't knowingly collect personal information from children. If you believe a child has given us personal information, contact us and we'll delete it.</p>
+
+  <h2 id="changes">9. Changes to this policy</h2>
+  <p>When we change this policy, we'll post the new version here with a new effective date. If the changes are significant, we'll also let you know in Whaser.</p>
+
+  <h2 id="contact">10. Contact us</h2>
+  <!--if:contact--><p>For questions or requests about privacy, email <a href="mailto:{{CONTACT}}">{{CONTACT}}</a>.</p><!--else--><p>For questions or requests about privacy, contact the Whaser team. Our contact address will be published here.</p><!--/if:contact-->
+</article>
+
+<footer>
+  <div class="wrap row">
+    <span>© 2026 Whaser</span>
+    <a href="/">Home</a>
+    <a href="{{SITE}}/privacy">Privacy Policy</a>
+    <!--if:contact--><a href="mailto:{{CONTACT}}">{{CONTACT}}</a><!--/if:contact-->
+  </div>
+</footer>
+<script>
+  try { if (localStorage.getItem('whaser_token')) { var b = document.getElementById('login'); b.textContent = 'Open Whaser'; b.classList.add('primary'); document.getElementById('start').hidden = true; } } catch (e) { /* storage blocked: keep "Log in" */ }
+</script>
+</body>
+</html>
