@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Whaser — AI agents for your business's WhatsApp</title>
+<meta name="description" content="Describe in plain words what your WhatsApp agent should do. Whaser builds it, and it answers your customers on your WhatsApp business number, day and night." />
+<link rel="canonical" href="{{SITE}}/" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2300a884'/%3E%3Cpath d='M9.5 9h13A3.5 3.5 0 0 1 26 12.5v6a3.5 3.5 0 0 1-3.5 3.5H16l-5 4v-4H9.5A3.5 3.5 0 0 1 6 18.5v-6A3.5 3.5 0 0 1 9.5 9z' fill='%2304231c'/%3E%3C/svg%3E" />
+<style>
+  :root { --bg:#0b141a; --panel:#111b21; --panel2:#202c33; --line:#2a3942; --text:#e9edef; --muted:#8696a0; --accent:#00a884; --accent2:#06cf9c; --out:#005c4b; }
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  html { scroll-behavior:smooth; }
+  body { margin:0; font:16px/1.55 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--text);
+    background:var(--bg) radial-gradient(1100px 520px at 75% -120px, rgba(0,168,132,.20), transparent 70%) no-repeat; }
+  a { color:var(--accent2); }
+  .wrap { max-width:1080px; margin:0 auto; padding-inline:20px; }
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:9px 16px; border-radius:10px; border:1px solid var(--line); background:var(--panel2); color:var(--text); font-weight:600; font-size:15px; text-decoration:none; white-space:nowrap; }
+  .btn:hover { border-color:var(--muted); }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#04231c; }
+  .btn.primary:hover { background:var(--accent2); border-color:var(--accent2); }
+  .btn.ghost { background:transparent; }
+  .btn.big { padding:13px 22px; font-size:16px; border-radius:12px; }
+
+  /* Header */
+  .top { position:sticky; top:0; z-index:10; background:rgba(11,20,26,.82); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border-bottom:1px solid rgba(42,57,66,.6); }
+  .bar { display:flex; align-items:center; gap:18px; height:64px; }
+  .brand { display:inline-flex; align-items:center; gap:10px; font-weight:700; font-size:20px; color:var(--text); text-decoration:none; }
+  .brand svg { width:30px; height:30px; flex:none; }
+  .links { display:flex; gap:20px; margin-inline-start:12px; }
+  .links a { color:var(--muted); text-decoration:none; font-size:15px; }
+  .links a:hover { color:var(--text); }
+  .actions { display:flex; align-items:center; gap:10px; margin-inline-start:auto; }
+  select.lang { font:inherit; font-size:14px; background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 8px; cursor:pointer; }
+
+  /* Hero */
+  .hero { display:grid; grid-template-columns:1.15fr .85fr; gap:56px; align-items:center; padding-block:72px 64px; }
+  .eyebrow { display:inline-block; margin:0 0 16px; padding:4px 12px; border-radius:999px; border:1px solid rgba(6,207,156,.35); background:rgba(0,168,132,.10); color:var(--accent2); font-size:13.5px; font-weight:600; }
+  h1 { font-size:clamp(34px,5.2vw,54px); line-height:1.08; letter-spacing:-.02em; margin:0 0 18px; }
+  .lede { font-size:clamp(17px,1.9vw,19px); color:#c5cfd4; margin:0 0 28px; max-width:34em; }
+  .cta { display:flex; gap:12px; flex-wrap:wrap; }
+  .note { color:var(--muted); font-size:14px; margin:16px 0 0; }
+
+  /* WhatsApp-style chat preview */
+  .phone { background:var(--panel); border:1px solid var(--line); border-radius:26px; padding:10px; box-shadow:0 30px 80px rgba(0,0,0,.45), 0 0 0 6px rgba(32,44,51,.5); max-width:380px; width:100%; justify-self:center; }
+  .phone-head { display:flex; align-items:center; gap:10px; padding:8px 10px 12px; border-bottom:1px solid var(--line); }
+  .avatar { width:38px; height:38px; border-radius:50%; background:#1f5132; display:grid; place-items:center; font-size:19px; flex:none; }
+  .phone-head b { display:block; font-size:15px; }
+  .phone-head small { color:var(--accent2); font-size:12.5px; }
+  .chat { display:flex; flex-direction:column; gap:8px; padding:14px 8px 8px; }
+  .bub { max-width:84%; padding:7px 11px 6px; border-radius:10px; font-size:14.5px; line-height:1.4; }
+  .bub time { display:block; text-align:end; font-size:11px; color:rgba(233,237,239,.55); margin-top:2px; }
+  .bub.in { align-self:flex-start; background:var(--panel2); border-start-start-radius:3px; }
+  .bub.out { align-self:flex-end; background:var(--out); border-start-end-radius:3px; }
+  .chip { align-self:center; margin-top:4px; font-size:12.5px; color:var(--muted); background:rgba(32,44,51,.7); border:1px solid var(--line); border-radius:999px; padding:3px 11px; }
+
+  /* Sections */
+  section.block { padding:64px 0; border-top:1px solid rgba(42,57,66,.6); }
+  h2 { font-size:clamp(26px,3.4vw,34px); line-height:1.15; letter-spacing:-.01em; margin:0 0 12px; }
+  .sub { color:var(--muted); font-size:17px; margin:0 0 34px; max-width:40em; }
+  .steps { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:22px; }
+  .card h3 { font-size:18px; margin:0 0 8px; }
+  .card p { margin:0; color:#c5cfd4; font-size:15.5px; }
+  .num { width:34px; height:34px; border-radius:50%; display:grid; place-items:center; background:rgba(0,168,132,.15); color:var(--accent2); font-weight:700; margin-bottom:14px; }
+  .features { display:grid; grid-template-columns:repeat(2,1fr); gap:18px; }
+  .icon { font-size:26px; margin-bottom:10px; }
+
+  /* Google data */
+  .services { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-bottom:26px; }
+  .services dl { margin:0; }
+  .services dt { font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--accent2); margin:14px 0 3px; }
+  .services dd { margin:0; color:#c5cfd4; font-size:15px; }
+  .promises { list-style:none; padding:0; margin:0 0 24px; display:grid; gap:12px; }
+  .promises li { position:relative; padding-inline-start:30px; color:#c5cfd4; }
+  .promises li::before { content:"✓"; position:absolute; inset-inline-start:0; top:0; width:20px; height:20px; border-radius:50%; background:rgba(0,168,132,.18); color:var(--accent2); font-size:12px; font-weight:700; display:grid; place-items:center; margin-top:3px; }
+  .promises b { color:var(--text); }
+  .limited { border:1px solid var(--line); border-inline-start:3px solid var(--accent); border-radius:10px; padding:14px 16px; background:rgba(17,27,33,.7); font-size:14.5px; color:#c5cfd4; margin:0 0 18px; }
+
+  .final { text-align:center; padding:72px 0; border-top:1px solid rgba(42,57,66,.6); }
+  .final h2 { margin-bottom:22px; }
+
+  footer { border-top:1px solid var(--line); padding:28px 0 40px; color:var(--muted); font-size:14px; }
+  footer .row { display:flex; flex-wrap:wrap; gap:10px 22px; align-items:center; }
+  footer a { color:var(--muted); }
+  footer a:hover { color:var(--text); }
+  footer .tm { margin:14px 0 0; font-size:12.5px; }
+
+  @media (max-width:900px) {
+    .hero { grid-template-columns:1fr; gap:40px; padding-block:48px; }
+    .steps, .services { grid-template-columns:1fr; }
+    .links { display:none; }
+  }
+  @media (max-width:640px) {
+    .features { grid-template-columns:1fr; }
+    .wrap { padding-inline:16px; }
+    .bar { gap:10px; }
+    .brand { font-size:18px; }
+    #start { display:none; }
+    section.block { padding:48px 0; }
+  }
+</style>
+</head>
+<body>
+<!--
+  Whaser's public homepage (served at /; the app itself is at /app). Google's app verification checks it:
+  it must say what Whaser does, why it asks for Google data, and link the privacy policy at exactly the
+  address on Google's consent screen ({{SITE}}/privacy). Keep the Google section in step with
+  site/privacy.html and with what the code actually does.
+-->
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="/" aria-label="Whaser">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#00a884"/><path d="M9.5 9h13A3.5 3.5 0 0 1 26 12.5v6a3.5 3.5 0 0 1-3.5 3.5H16l-5 4v-4H9.5A3.5 3.5 0 0 1 6 18.5v-6A3.5 3.5 0 0 1 9.5 9z" fill="#04231c"/><circle cx="11.5" cy="15.5" r="1.6" fill="#06cf9c"/><circle cx="16" cy="15.5" r="1.6" fill="#06cf9c"/><circle cx="20.5" cy="15.5" r="1.6" fill="#06cf9c"/></svg>
+      Whaser
+    </a>
+    <nav class="links">
+      <a href="#how" data-t="nav.how">How it works</a>
+      <a href="#google" data-t="nav.google">Your Google data</a>
+      <a href="{{SITE}}/privacy" data-t="nav.privacy">Privacy</a>
+    </nav>
+    <div class="actions">
+      <select class="lang" id="lang" aria-label="Language"><option value="en">English</option><option value="he">עברית</option></select>
+      <a class="btn ghost" id="login" href="/app" data-t="nav.login">Log in</a>
+      <a class="btn primary" id="start" href="/app?signup" data-t="nav.start">Get started</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div>
+      <p class="eyebrow" data-t="hero.eyebrow">AI agents for WhatsApp</p>
+      <h1 data-t="hero.title">Your business answers on WhatsApp, even when you can't.</h1>
+      <p class="lede" data-t="hero.lede">Describe in plain words what your agent should do. Whaser builds it, and it answers your customers on your WhatsApp business number, day and night.</p>
+      <div class="cta">
+        <a class="btn primary big" href="/app?signup" data-t="hero.cta">Create your first agent</a>
+        <a class="btn ghost big" href="#how" data-t="hero.how">See how it works</a>
+      </div>
+      <p class="note" data-t="hero.note">No code, no forms, and nothing to set up outside Whaser.</p>
+    </div>
+    <div class="phone" aria-hidden="true">
+      <div class="phone-head">
+        <span class="avatar">🍝</span>
+        <div><b data-t="chat.name">Bella's Bistro</b><small data-t="chat.status">Answered by a Whaser agent</small></div>
+      </div>
+      <div class="chat">
+        <div class="bub in"><span data-t="chat.1">Hi! Do you have a table for 4 tomorrow at 8pm?</span><time>19:02</time></div>
+        <div class="bub out"><span data-t="chat.2">Hi! Yes, there's a table for 4 by the window tomorrow at 20:00. Shall I book it for you?</span><time>19:02</time></div>
+        <div class="bub in"><span data-t="chat.3">Yes please, under Dana</span><time>19:03</time></div>
+        <div class="bub out"><span data-t="chat.4">Done ✅ Table for 4, tomorrow at 20:00, under Dana. See you then!</span><time>19:03</time></div>
+        <span class="chip" data-t="chat.chip">📅 Added to the restaurant's Google Calendar</span>
+      </div>
+    </div>
+  </div>
+
+  <section class="block" id="how">
+    <div class="wrap">
+      <h2 data-t="how.title">From an idea to a working agent in three steps</h2>
+      <p class="sub" data-t="how.sub">You know your business. Whaser turns what you tell it into an agent that works for you.</p>
+      <div class="steps">
+        <div class="card"><div class="num">1</div><h3 data-t="how.1.t">Describe it</h3><p data-t="how.1.p">Chat with Whaser's builder: who your customers are, what they usually ask, and how you'd like your agent to sound.</p></div>
+        <div class="card"><div class="num">2</div><h3 data-t="how.2.t">Try it, then publish</h3><p data-t="how.2.p">Whaser turns the conversation into your agent. Test it in a practice chat, change anything you like, and publish when you're happy.</p></div>
+        <div class="card"><div class="num">3</div><h3 data-t="how.3.t">It answers on WhatsApp</h3><p data-t="how.3.p">Get a WhatsApp business number with one click. Your agent replies around the clock, and you can follow its conversations and pause it at any time.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="features">
+    <div class="wrap">
+      <h2 data-t="feat.title">Everything your agent needs, without the complicated setup</h2>
+      <p class="sub" data-t="feat.sub">Connections work the way you already know: one click, or "Sign in with Google".</p>
+      <div class="features">
+        <div class="card"><div class="icon">💬</div><h3 data-t="feat.1.t">Built through conversation</h3><p data-t="feat.1.p">No forms or flowcharts. Explain what you need the way you'd explain it to a new employee.</p></div>
+        <div class="card"><div class="icon">📲</div><h3 data-t="feat.2.t">Your own WhatsApp business number</h3><p data-t="feat.2.p">Each workspace gets its own WhatsApp business number with one click, with no messaging provider accounts to set up.</p></div>
+        <div class="card"><div class="icon">📅</div><h3 data-t="feat.3.t">Connected to your Google account</h3><p data-t="feat.3.p">If you choose, an agent can check your calendar and book appointments, look up your price list in Google Drive, or answer email in Gmail. It can use only what you allow.</p></div>
+        <div class="card"><div class="icon">🎛️</div><h3 data-t="feat.4.t">You stay in control</h3><p data-t="feat.4.p">Choose exactly what each agent may use, see what it costs, and pause it whenever you want.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="google">
+    <div class="wrap">
+      <h2 data-t="g.title">How Whaser uses your Google account</h2>
+      <p class="sub" data-t="g.sub">Connecting Google is optional. You sign in on Google's own screen, which shows exactly what you're allowing, and for each agent you choose what it may use:</p>
+      <div class="services">
+        <div class="card"><h3>Gmail</h3><dl>
+          <dt data-t="g.read">Read</dt><dd data-t="g.gmail.r">Find and read the emails an agent needs to answer a customer, such as an order confirmation.</dd>
+          <dt data-t="g.write">Read &amp; write</dt><dd data-t="g.gmail.w">Also send emails and replies, save drafts, and mark, archive or star messages.</dd>
+        </dl></div>
+        <div class="card"><h3>Google Calendar</h3><dl>
+          <dt data-t="g.read">Read</dt><dd data-t="g.cal.r">Check your upcoming events and when you're free.</dd>
+          <dt data-t="g.write">Read &amp; write</dt><dd data-t="g.cal.w">Also book, move or cancel appointments. Google notifies the guests.</dd>
+        </dl></div>
+        <div class="card"><h3>Google Drive</h3><dl>
+          <dt data-t="g.read">Read</dt><dd data-t="g.drive.r">Find and read your documents, such as a price list or a menu.</dd>
+          <dt data-t="g.write">Read &amp; write</dt><dd data-t="g.drive.w">Also create documents and spreadsheets, and update or rename files.</dd>
+        </dl></div>
+      </div>
+      <ul class="promises">
+        <li data-t="g.p1"><b>Only for the tasks you give your agents.</b> An agent uses your Google account only while it's doing something you set it up to do, like answering a customer.</li>
+        <li data-t="g.p2"><b>No copies.</b> We don't keep copies of your emails, events or files. We store only the access keys Google gives us, so your agents can reach what you allowed.</li>
+        <li data-t="g.p3"><b>Never sold, never for ads, never for AI training.</b> We don't sell your data, use it for advertising, or use it to train AI models.</li>
+        <li data-t="g.p4"><b>Disconnect any time.</b> In Whaser go to Settings → Connected accounts, or remove Whaser in your Google Account settings.</li>
+      </ul>
+      <p class="limited" data-t="g.limited">Whaser's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+      <a href="{{SITE}}/privacy#google" data-t="g.more">Read the full Privacy Policy →</a>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap">
+      <h2 data-t="final.title">Ready to give your business a WhatsApp agent?</h2>
+      <a class="btn primary big" href="/app?signup" data-t="hero.cta">Create your first agent</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="row">
+      <span>© 2026 Whaser</span>
+      <a href="{{SITE}}/privacy" data-t="foot.privacy">Privacy Policy</a>
+      <!--if:contact--><a href="mailto:{{CONTACT}}">{{CONTACT}}</a><!--/if:contact-->
+      <a href="/app" data-t="nav.login">Log in</a>
+    </div>
+    <p class="tm" data-t="foot.tm">Google, Gmail, Google Calendar and Google Drive are trademarks of Google LLC. WhatsApp is a trademark of WhatsApp LLC.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // Hebrew for every [data-t] element; English is what the page is written in (and what crawlers see).
+  var HE = {
+    'title': 'Whaser — סוכני AI לוואטסאפ של העסק שלכם',
+    'nav.how': 'איך זה עובד',
+    'nav.google': 'הנתונים שלכם ב-Google',
+    'nav.privacy': 'פרטיות',
+    'nav.login': 'כניסה',
+    'nav.open': 'פתיחת Whaser',
+    'nav.start': 'מתחילים',
+    'hero.eyebrow': 'סוכני AI לוואטסאפ',
+    'hero.title': 'העסק שלכם עונה בוואטסאפ, גם כשאתם לא זמינים.',
+    'hero.lede': 'תארו במילים פשוטות מה הסוכן צריך לעשות. Whaser בונה אותו, והוא עונה ללקוחות שלכם במספר הוואטסאפ העסקי שלכם, ביום ובלילה.',
+    'hero.cta': 'צרו את הסוכן הראשון שלכם',
+    'hero.how': 'איך זה עובד',
+    'hero.note': 'בלי קוד, בלי טפסים, ובלי שום הגדרה מחוץ ל-Whaser.',
+    'chat.name': 'ביסטרו בלה',
+    'chat.status': 'עונה סוכן של Whaser',
+    'chat.1': 'היי! יש לכם שולחן ל-4 מחר ב-20:00?',
+    'chat.2': 'היי! כן, יש שולחן ל-4 ליד החלון מחר ב-20:00. להזמין לכם?',
+    'chat.3': 'כן בבקשה, על שם דנה',
+    'chat.4': 'בוצע ✅ שולחן ל-4, מחר ב-20:00, על שם דנה. נתראה!',
+    'chat.chip': '📅 נוסף ליומן Google של המסעדה',
+    'how.title': 'מרעיון לסוכן עובד בשלושה צעדים',
+    'how.sub': 'אתם מכירים את העסק שלכם. Whaser הופך את מה שתספרו לו לסוכן שעובד בשבילכם.',
+    'how.1.t': 'מתארים',
+    'how.1.p': 'משוחחים עם הבונה של Whaser: מי הלקוחות שלכם, מה הם שואלים בדרך כלל, ואיך תרצו שהסוכן יישמע.',
+    'how.2.t': 'בודקים ומפרסמים',
+    'how.2.p': 'Whaser הופך את השיחה לסוכן. בודקים אותו בצ\'אט ניסיון, משנים כל מה שרוצים, ומפרסמים כשמרוצים.',
+    'how.3.t': 'הסוכן עונה בוואטסאפ',
+    'how.3.p': 'מקבלים מספר וואטסאפ עסקי בלחיצה אחת. הסוכן עונה מסביב לשעון, ואתם יכולים לעקוב אחרי השיחות שלו ולעצור אותו בכל רגע.',
+    'feat.title': 'כל מה שהסוכן צריך, בלי הגדרות מסובכות',
+    'feat.sub': 'החיבורים עובדים כמו שאתם כבר מכירים: לחיצה אחת, או "כניסה באמצעות Google".',
+    'feat.1.t': 'נבנה מתוך שיחה',
+    'feat.1.p': 'בלי טפסים ובלי תרשימי זרימה. מסבירים לו מה צריך, כמו שמסבירים לעובד חדש.',
+    'feat.2.t': 'מספר וואטסאפ עסקי משלכם',
+    'feat.2.p': 'כל סביבת עבודה מקבלת מספר וואטסאפ עסקי משלה בלחיצה אחת, בלי לפתוח חשבונות אצל ספקי הודעות.',
+    'feat.3.t': 'מחובר לחשבון Google שלכם',
+    'feat.3.p': 'אם תרצו, הסוכן יכול לבדוק ביומן ולקבוע פגישות, למצוא את המחירון שלכם ב-Google Drive, או לענות למיילים ב-Gmail. הוא יכול להשתמש רק במה שתאשרו לו.',
+    'feat.4.t': 'השליטה נשארת אצלכם',
+    'feat.4.p': 'בוחרים בדיוק במה כל סוכן רשאי להשתמש, רואים כמה הוא עולה, ועוצרים אותו מתי שרוצים.',
+    'g.title': 'איך Whaser משתמש בחשבון Google שלכם',
+    'g.sub': 'החיבור ל-Google הוא אופציונלי. נכנסים במסך של Google עצמה, שמראה בדיוק מה אתם מאשרים, ולכל סוכן בוחרים במה הוא רשאי להשתמש:',
+    'g.read': 'קריאה',
+    'g.write': 'קריאה וכתיבה',
+    'g.gmail.r': 'מוצא וקורא את המיילים שהסוכן צריך כדי לענות ללקוח, כמו אישור הזמנה.',
+    'g.gmail.w': 'גם שולח מיילים ותשובות, שומר טיוטות, ומסמן, מעביר לארכיון או מסמן בכוכב הודעות.',
+    'g.cal.r': 'בודק את האירועים הקרובים ומתי אתם פנויים.',
+    'g.cal.w': 'גם קובע, מזיז או מבטל פגישות. Google מודיעה למוזמנים.',
+    'g.drive.r': 'מוצא וקורא את המסמכים שלכם, כמו מחירון או תפריט.',
+    'g.drive.w': 'גם יוצר מסמכים וגיליונות, ומעדכן קבצים או משנה את שמם.',
+    'g.p1': '<b>רק למשימות שנתתם לסוכנים.</b> סוכן משתמש בחשבון Google שלכם רק בזמן שהוא עושה משהו שהגדרתם לו, כמו לענות ללקוח.',
+    'g.p2': '<b>בלי עותקים.</b> אנחנו לא שומרים עותקים של המיילים, האירועים או הקבצים שלכם. אנחנו שומרים רק את מפתחות הגישה ש-Google נותנת לנו, כדי שהסוכנים יוכלו להגיע למה שאישרתם.',
+    'g.p3': '<b>אף פעם לא נמכר, לא לפרסום ולא לאימון AI.</b> אנחנו לא מוכרים את הנתונים שלכם, לא משתמשים בהם לפרסום ולא לאימון מודלים של בינה מלאכותית.',
+    'g.p4': '<b>אפשר להתנתק בכל רגע.</b> ב-Whaser עוברים להגדרות ← חשבונות מחוברים, או מסירים את Whaser בהגדרות חשבון Google.',
+    'g.limited': 'השימוש של Whaser במידע שמתקבל מממשקי ה-API של Google, והעברתו לכל אפליקציה אחרת, יעמדו ב<a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">מדיניות נתוני המשתמש של שירותי ה-API של Google</a> (Google API Services User Data Policy), כולל דרישות השימוש המוגבל (Limited Use).',
+    'g.more': 'למדיניות הפרטיות המלאה (באנגלית) ←',
+    'final.title': 'מוכנים לתת לעסק שלכם סוכן וואטסאפ?',
+    'foot.privacy': 'מדיניות פרטיות',
+    'foot.tm': 'Google, Gmail, Google Calendar ו-Google Drive הם סימנים מסחריים של Google LLC. WhatsApp הוא סימן מסחרי של WhatsApp LLC.'
+  };
+  var EN = { title: document.title };
+  var els = document.querySelectorAll('[data-t]');
+  els.forEach(function (el) { if (!(el.dataset.t in EN)) EN[el.dataset.t] = el.innerHTML; });
+  EN['nav.open'] = 'Open Whaser';
+
+  function store(fn) { try { return fn(); } catch (e) { return null; } }
+  var signedIn = !!store(function () { return localStorage.getItem('whaser_token'); });
+  var login = document.getElementById('login');
+  if (signedIn) { login.dataset.t = 'nav.open'; login.classList.replace('ghost', 'primary'); document.getElementById('start').hidden = true; }
+
+  function apply(lang) {
+    var dict = lang === 'he' ? HE : EN;
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === 'he' ? 'rtl' : 'ltr';
+    document.title = dict.title;
+    document.querySelectorAll('[data-t]').forEach(function (el) { var k = el.dataset.t; el.innerHTML = dict[k] != null ? dict[k] : EN[k]; });
+  }
+  var sel = document.getElementById('lang');
+  var saved = store(function () { return localStorage.getItem('whaser_lang'); });
+  var lang = saved === 'he' || saved === 'en' ? saved : (/^he\b/i.test(navigator.language || '') ? 'he' : 'en');
+  sel.value = lang;
+  apply(lang);
+  sel.addEventListener('change', function () { store(function () { localStorage.setItem('whaser_lang', sel.value); }); apply(sel.value); });
+})();
+</script>
+</body>
+</html>

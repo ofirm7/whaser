@@ -320,6 +320,9 @@ const I18N = { he: {
     "Pop-up blocked — open Google sign-in": "החלון הקופץ נחסם — פתחו את ההתחברות ל-Google",
     "Disconnect Google": "ניתוק Google",
     "Disconnect Google?": "לנתק את Google?",
+    "Whaser uses your Google data only for what you let your agents do — never for ads or AI training.": "Whaser משתמש בנתוני Google שלכם רק למה שתאפשרו לסוכנים שלכם — אף פעם לא לפרסום ולא לאימון AI.",
+    "Privacy policy": "מדיניות פרטיות",
+    "Home": "דף הבית",
     "⚠️ Anyone who can message this agent can ask it to use what you connect here — for example to read your email or, with Read & write, to send email as you. Connect only what this agent needs.": "⚠️ כל מי שיכול לשלוח הודעה לסוכן יכול לבקש ממנו להשתמש במה שתחברו כאן — למשל לקרוא את המיילים שלכם או, עם קריאה וכתיבה, לשלוח מיילים בשמכם. חברו רק את מה שהסוכן הזה צריך.",
     "Google:": "Google:",
     "no Google connections": "אין חיבורי Google",
@@ -635,7 +638,7 @@ async function topUpDialog(){
 function LoginView(){
   const c = $('<div class="center"></div>');
   const card = $('<div class="card login"></div>');
-  let amode='login';
+  let amode=new URLSearchParams(location.search).has('signup')?'signup':'login'; // the homepage's "Get started" links /app?signup
   const submit = async ()=>{ const signup=amode==='signup'; const e=card.querySelector('#e'); if(e) e.textContent='';
     try{
       const body={ username:card.querySelector('#u').value.trim(), password:card.querySelector('#p').value };
@@ -655,7 +658,8 @@ function LoginView(){
       <label>${t('Password')}</label><input id="p" type="password" autocomplete="${signup?'new-password':'current-password'}" placeholder="${signup?t('at least 6 characters'):t('password')}"/>
       <div style="margin-top:14px"><button class="primary" id="go" style="width:100%">${signup?t('Create account'):t('Sign in')}</button></div>
       <div class="err" id="e" style="margin-top:10px"></div>
-      <div class="muted" style="margin-top:12px;font-size:12.5px">${signup?t('Your account gets its <b>own agents and WhatsApp connection</b>; the catalog is shared.'):t('New here? Click <b>Sign up</b> to get your own agents + WhatsApp.')}</div>`;
+      <div class="muted" style="margin-top:12px;font-size:12.5px">${signup?t('Your account gets its <b>own agents and WhatsApp connection</b>; the catalog is shared.'):t('New here? Click <b>Sign up</b> to get your own agents + WhatsApp.')}</div>
+      <div class="muted" style="margin-top:14px;font-size:12.5px;text-align:center"><a href="/">${t('Home')}</a> · <a href="/privacy" target="_blank" rel="noopener">${t('Privacy policy')}</a></div>`;
     // Switch language without a full re-render so typed credentials survive the repaint.
     const langSel = card.querySelector('.lang');
     if (langSel) langSel.onchange = (e)=>{
@@ -1246,6 +1250,8 @@ function googleWaitingNote(signin){
   if(signin.blockedUrl){ const a=$(`<a target="_blank" rel="opener" style="display:inline-block;margin-top:4px">${t('Pop-up blocked — open Google sign-in')}</a>`); a.href=signin.blockedUrl; d.appendChild(a); }
   return d;
 }
+// Shown with "Sign in with Google": what Whaser does with Google data, and where the privacy policy is.
+function googlePrivacyNote(){ return $(`<div class="muted" style="font-size:12.5px;margin-top:8px">${t('Whaser uses your Google data only for what you let your agents do — never for ads or AI training.')} <a href="/privacy#google" target="_blank" rel="noopener">${t('Privacy policy')}</a></div>`); }
 async function confirmGoogleDisconnect(){
   return confirmDialog({ title:t('Disconnect Google?'), message:t('Every agent in this workspace loses access to your Gmail, Calendar and Drive until you sign in with Google again.'), confirmLabel:t('Disconnect Google'), danger:true });
 }
@@ -1302,7 +1308,7 @@ function buildConnectionsPicker(container, preset, opts){
     }
     if(missing().length){
       foot.appendChild($(`<div class="muted" style="margin:8px 0">${st.connected?t('To allow the access you picked, sign in with Google again.'):t('Sign in with your Google account — Google shows you exactly what this agent will be allowed to do.')}</div>`));
-      const gb=googleButton(); gb.onclick=()=>connect(gb); foot.appendChild(gb);
+      const gb=googleButton(); gb.onclick=()=>connect(gb); foot.appendChild(gb); foot.appendChild(googlePrivacyNote());
     } else if(!st.connected) foot.appendChild($(`<div class="muted">${t('Tick what this agent may use, then sign in with Google.')}</div>`));
     if(signin) foot.appendChild(googleWaitingNote(signin));
     if(Object.keys(sel).length) box.appendChild($(`<div class="card" style="border-color:var(--danger);margin:10px 0 0;padding:10px 12px;font-size:13.5px">${t('⚠️ Anyone who can message this agent can ask it to use what you connect here — for example to read your email or, with Read & write, to send email as you. Connect only what this agent needs.')}</div>`));
@@ -1350,7 +1356,7 @@ function buildGoogleAccountCard(container){
     } else {
       body.appendChild($(`<div class="muted">${use?`${t('Not signed in yet. Your agents use:')} ${use}`:t('Not signed in yet. Sign in once — then choose, on each agent\'s page, whether it may use your Gmail, Calendar or Drive.')}</div>`));
     }
-    const actions=$('<div class="row" style="flex-wrap:wrap;gap:10px;margin-top:10px"></div>'); body.appendChild(actions);
+    const actions=$('<div class="row" style="flex-wrap:wrap;gap:10px;margin-top:10px"></div>'); body.appendChild(actions); body.appendChild(googlePrivacyNote());
     if(!st.connected || need.length){ const gb=googleButton(); gb.onclick=()=>signIn(gb); actions.appendChild(gb); }
     if(st.connected){
       const b=$(`<button class="ghost">${t('Disconnect Google')}</button>`); actions.appendChild(b);

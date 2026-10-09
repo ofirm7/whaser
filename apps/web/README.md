@@ -20,8 +20,11 @@ So the wizard produces a genuinely schema-valid, consistency-checked AgentSpec, 
 ```bash
 cd apps/web
 npm install
-PORT=8080 npm start     # → http://0.0.0.0:8080
+PORT=8080 npm start     # → http://0.0.0.0:8080/app
 ```
+
+The app is at **`/app`**; `/` is the public homepage and `/privacy` the privacy policy (see
+[Homepage and privacy policy](#homepage-and-privacy-policy)).
 
 Log in as `alice` / `bob` (tenant **Acme**) or `carol` (tenant **Globex**) — password `password`.
 
@@ -70,6 +73,25 @@ PUBLIC_URL=https://whaser.example.com:9443
   `certbot certonly --webroot -w <the directory port 80 serves> -d whaser.example.com --cert-name whaser`
   (or `--standalone` when nothing listens on port 80). Certbot's timer renews it.
 
+## Homepage and privacy policy
+
+`/` serves a public homepage and `/privacy` the privacy policy, both readable without signing in, from
+`site/home.html` and `site/privacy.html`. The app itself is at `/app` (its sign-in card links back to both;
+`/app?signup` opens Sign up). Google's app verification needs both pages: the homepage has to say what
+Whaser does and why it asks for Google data, and link the privacy policy at **exactly** the address entered
+on Google's consent screen. Two optional settings in `apps/web/.env`:
+
+```bash
+SITE_URL=https://whaser.example.com     # the address people type; the homepage links $SITE_URL/privacy (default: PUBLIC_URL)
+CONTACT_EMAIL=privacy@whaser.example.com   # published as the privacy contact (unset: the pages say it will be added)
+```
+
+The privacy policy describes what the code does with data today: what's collected, the Google scopes and
+why, that Google content isn't stored (only the tokens), who it's shared with (Anthropic, Twilio,
+WhatsApp, the host), and that conversations stay in memory. **Update it, and its effective date, before
+shipping a change to any of that**, e.g. new Google scopes, storing conversations on disk, a new
+provider, or turning personal WhatsApp linking back on.
+
 ## Connect Google (Gmail, Calendar, Drive)
 
 When you create an agent, the publish step lets you give it **Gmail**, **Google Calendar** and
@@ -104,6 +126,8 @@ log says `Sign in with Google: off`.
    enable the **Gmail API**, **Google Calendar API** and **Google Drive API**.
 2. Configure the OAuth consent screen with Whaser's name, logo and support email — that's what customers
    see when they sign in. While it's in *Testing*, only the Google accounts added as test users can sign in.
+   Under Branding, set the app name to **Whaser** (as on the homepage), the home page to `$SITE_URL/`, the
+   privacy policy to `$SITE_URL/privacy`, and add your domain under *Authorized domains*.
 3. Create an **OAuth client ID** of type *Web application* with the **Authorized redirect URI**
    `https://<your Whaser domain>/api/google/callback`. Google only accepts `https://` on a real domain, or
    `http://localhost:<port>` — never a raw IP address (on an IP, the button explains that Whaser must be

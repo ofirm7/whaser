@@ -786,13 +786,42 @@ app.get('/api/activity', wrap(async (req, res, auth) => {
   res.json({ events: state.recentActivity(auth.tenantId, agentId) });
 }));
 
-// --- Static SPA ---
+// --- Public site: the homepage (/) and the privacy policy (/privacy) ---
+// Readable without signing in — Google's app verification requires both. SITE_URL is the address people
+// type (e.g. https://whaser.site; defaults to PUBLIC_URL): the homepage links the privacy policy there, so the
+// link matches the one on Google's consent screen exactly. CONTACT_EMAIL is the published contact address;
+// <!--if:contact-->…<!--else-->…<!--/if:contact--> blocks in the pages depend on it.
+const siteDir = fileURLToPath(new URL('../site', import.meta.url));
+const siteUrl = (process.env.SITE_URL?.trim() || publicUrl || '').replace(/\/+$/, '');
+const contactEmail = process.env.CONTACT_EMAIL?.trim() ?? '';
+const siteCache = new Map<string, { mtimeMs: number; html: string }>();
+const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+function sitePage(name: 'home' | 'privacy'): string {
+  const file = `${siteDir}/${name}.html`;
+  const mtimeMs = statSync(file).mtimeMs;
+  const hit = siteCache.get(name);
+  if (hit?.mtimeMs === mtimeMs) return hit.html;
+  const html = readFileSync(file, 'utf8')
+    .replace(/<!--if:contact-->([\s\S]*?)(?:<!--else-->([\s\S]*?))?<!--\/if:contact-->/g, (_m, yes: string, no?: string) => (contactEmail ? yes : no ?? ''))
+    .replaceAll('{{SITE}}', escHtml(siteUrl))
+    .replaceAll('{{CONTACT}}', escHtml(contactEmail));
+  siteCache.set(name, { mtimeMs, html });
+  return html;
+}
+const sendSite = (name: 'home' | 'privacy') => (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-cache').type('html').send(sitePage(name));
+};
+app.get('/', sendSite('home'));
+app.get('/privacy', sendSite('privacy'));
+
+// --- Static SPA (the app itself, at /app) ---
 // no-cache on the SPA so a redeploy/restart always serves the latest JS; the page itself is sent stamped
 // with its version (see uiPage), and reloads itself when a newer one goes live.
 const sendUi = (_req: Request, res: Response) => {
   res.set('Cache-Control', 'no-cache').type('html').send(uiPage().html);
 };
-app.get(['/', '/index.html'], sendUi);
+app.get(['/app', '/index.html'], sendUi);
 app.use(express.static(publicDir, { index: false, etag: false, setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
 app.get('*', sendUi);
 
@@ -800,6 +829,8 @@ const port = Number(process.env.PORT ?? 8080);
 app.listen(port, '0.0.0.0', () => {
   console.log(`Whaser demo GUI on http://0.0.0.0:${port}  (login: alice/password, bob/password, carol/password)`);
   if (publicUrl) console.log(`Public address: ${publicUrl} (page loads elsewhere are sent there)`);
+  console.log(`Homepage at /, privacy policy at /privacy (linked as ${siteUrl || ''}/privacy), the app at /app`);
+  if (!contactEmail) console.log('⚠ CONTACT_EMAIL is not set — the privacy policy has no contact address (Google verification needs one)');
   const pinned = process.env.GOOGLE_REDIRECT_URI;
   if (!state.google.isConfigured()) console.log('Sign in with Google: off — set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (see apps/web/README.md) to turn it on for every workspace');
   else console.log(`Sign in with Google: on (redirect URI ${pinned ?? '<the URL Whaser is opened at>/api/google/callback'}${pinned && redirectUriProblem(pinned) ? ' — ⚠ Google rejects this address: use https on a domain, or localhost' : ''})`);
