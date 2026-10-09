@@ -62,30 +62,33 @@ agent page → **🔗 Google connections**). The agent then gets real tools for 
 | Google Calendar | list events / check availability | create, update, delete events (attendees are notified) |
 | Google Drive | search, read files (Docs, Sheets as CSV, Slides, text; folders list their files) | create Docs/Sheets/text files, replace a file's content, rename |
 
-Each workspace uses **its own Google OAuth client**, entered in the UI under **⚙️ Settings → Google**
-(the connections picker opens the same form if it's missing), and links **one** Google account (OAuth
-pop-up). Every agent in the workspace can opt into that account. The client secret is write-only (the
-UI only ever shows its last 4 characters); on save, Whaser asks Google to confirm the ID + secret pair.
-Client + tokens are stored owner-only in the gitignored `.data/google-clients.json` /
-`.data/google-accounts.json`. Switching to a different client unlinks the account (its tokens belong
-to the old client). Writes are simulated during the improve chat's test runs. The agent page warns when
-an agent's connections aren't granted by the linked account yet.
+Connecting is a **"Sign in with Google"** button: the owner picks what the agent may do, clicks
+**Sign in with Google**, and approves on Google's own consent screen in a pop-up — no setup, nothing to
+create or paste. Each workspace links **one** Google account; every agent in the workspace can opt into it,
+and asking for more access later just shows the button again (Google adds to what was already allowed).
+**⚙️ Settings → Connected accounts** shows which account is signed in and what it allows, with
+**Disconnect**. Tokens are stored owner-only in the gitignored `.data/google-accounts.json`. Writes are
+simulated during the improve chat's test runs. The agent page warns when an agent's connections aren't
+allowed by the signed-in account yet.
 
 > ⚠️ Anyone who can message an agent can ask it to use its connections — with Gmail **Read & write**
 > that includes sending email as you. Grant write access only to agents that need it.
 
-Creating the OAuth client (once per workspace — the Settings page walks through it):
+### Turning on Sign in with Google (operator, once per Whaser server)
 
-1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials) create a project, enable
-   the **Gmail API**, **Google Calendar API** and **Google Drive API**, and configure the OAuth consent
-   screen (while it's in *Testing*, add your Google accounts as test users).
-2. Create an **OAuth client ID** of type *Web application* and add the **Authorized redirect URI** shown
-   in Settings (`<the URL you opened Whaser at>/api/google/callback`). Google only accepts `https://` on a
-   real domain, or `http://localhost:<port>` (e.g. through an SSH tunnel) — never a raw IP address; the
-   Settings page warns when the current address won't work.
-3. Paste the client ID and secret into Settings → Google and save.
+The Google app behind the button belongs to the Whaser deployment, not to its customers. Until it's set,
+the button is replaced by "Sign in with Google isn't turned on for this Whaser server yet", and the server
+log says `Sign in with Google: off`.
 
-Optional server-wide default (used by workspaces that haven't saved their own), in `apps/web/.env`:
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials) create a project and
+   enable the **Gmail API**, **Google Calendar API** and **Google Drive API**.
+2. Configure the OAuth consent screen with Whaser's name, logo and support email — that's what customers
+   see when they sign in. While it's in *Testing*, only the Google accounts added as test users can sign in.
+3. Create an **OAuth client ID** of type *Web application* with the **Authorized redirect URI**
+   `https://<your Whaser domain>/api/google/callback`. Google only accepts `https://` on a real domain, or
+   `http://localhost:<port>` — never a raw IP address (on an IP, the button explains that Whaser must be
+   opened at its secure address).
+4. Put the client in `apps/web/.env` and restart:
 
 ```bash
 GOOGLE_CLIENT_ID=1234-abc.apps.googleusercontent.com
@@ -94,9 +97,14 @@ GOOGLE_CLIENT_SECRET=GOCSPX-...
 GOOGLE_REDIRECT_URI=https://whaser.example.com/api/google/callback
 ```
 
+Switching to a different OAuth client later signs every workspace out of Google (their tokens belong to
+the old client), so they'd each sign in again.
+
 Scopes requested: `gmail.readonly` / `gmail.modify`, `calendar.events.readonly` / `calendar.events`,
 `drive.readonly` / `drive` (read / read & write). The Gmail and Drive scopes are Google *restricted*
-scopes (Calendar's are *sensitive*) — fine for test users, but a public app needs Google's verification.
+scopes (Calendar's are *sensitive*) — fine for test users, but opening sign-in to every customer needs
+Google's app verification (for Gmail/Drive, including a security assessment). That's done once, by the
+operator, for the whole Whaser deployment.
 
 ## Going to full production (LibreChat fork)
 
