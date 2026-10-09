@@ -50,6 +50,26 @@ PORT=8080 npm start
 
 Nothing else changes — same GUI, same code paths, now backed by Claude.
 
+## HTTPS and a public address
+
+Google sign-in needs Whaser on **https at a real domain**. The app can serve https itself next to the
+plain-http port, in `apps/web/.env`:
+
+```bash
+HTTPS_PORT=9443
+TLS_CERT_FILE=/etc/letsencrypt/live/whaser/fullchain.pem
+TLS_KEY_FILE=/etc/letsencrypt/live/whaser/privkey.pem
+PUBLIC_URL=https://whaser.example.com:9443
+```
+
+- The certificate is re-read every 12 hours, so Let's Encrypt renewals need no restart. If it can't be
+  read, the error is logged and plain http keeps serving.
+- With `PUBLIC_URL` set, a browser that opens Whaser anywhere else (the raw IP, plain http) is sent to it.
+  API calls, webhooks and `localhost` (SSH tunnels) are never redirected.
+- Get the certificate once the domain's DNS points at the server, e.g.
+  `certbot certonly --webroot -w <the directory port 80 serves> -d whaser.example.com --cert-name whaser`
+  (or `--standalone` when nothing listens on port 80). Certbot's timer renews it.
+
 ## Connect Google (Gmail, Calendar, Drive)
 
 When you create an agent, the publish step lets you give it **Gmail**, **Google Calendar** and
@@ -87,7 +107,7 @@ log says `Sign in with Google: off`.
 3. Create an **OAuth client ID** of type *Web application* with the **Authorized redirect URI**
    `https://<your Whaser domain>/api/google/callback`. Google only accepts `https://` on a real domain, or
    `http://localhost:<port>` — never a raw IP address (on an IP, the button explains that Whaser must be
-   opened at its secure address).
+   opened at its secure address). See [HTTPS and a public address](#https-and-a-public-address).
 4. Put the client in `apps/web/.env` and restart:
 
 ```bash
