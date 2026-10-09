@@ -90,6 +90,17 @@ lldap UI. (Mapping groups → Whaser tenants/roles is finished in Phase 5.)
 **Done when:** messaging the test number from a pre-verified phone echoes back unattended over
 HTTPS, still works the next day, and a duplicated Meta delivery does not double-reply.
 
+### Alternative: Twilio WhatsApp (testable in minutes)
+
+The demo app (`apps/web`) can also run agents on **Twilio** WhatsApp numbers — the Twilio Sandbox needs
+no Meta approval, so it is the fastest way to a non-personal number. The operator puts one Twilio account
+and its WhatsApp numbers in the environment (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_WHATSAPP_NUMBERS`) and points the numbers' "When a message comes in" webhook at
+`/api/twilio/whatsapp`; each workspace then takes a number in Settings with one click and picks the
+answering agent. Full steps and behaviour:
+[`apps/web/README.md`](../apps/web/README.md#whatsapp-business-numbers-twilio). Branded numbers on Twilio
+still go through Meta's sender registration, with the same 24-hour-window and template rules as below.
+
 ### Verified brand identity (external dependency — track it)
 
 A *verified* display name (real brand identity) requires Meta **Business Verification** +

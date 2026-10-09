@@ -334,7 +334,39 @@ const I18N = { he: {
     "The connected Google account ({0}) will be disconnected, because its access belongs to the old client. You can connect it again afterwards.": "חשבון ה-Google המחובר ({0}) ינותק, כי הגישה שלו שייכת ללקוח הקודם. אפשר לחבר אותו שוב אחר כך.",
     "Remove Google client?": "להסיר את לקוח ה-Google?",
     "Agents lose access to Gmail, Calendar and Drive until a Google client is saved and the account is connected again.": "הסוכנים יאבדו גישה ל-Gmail, ליומן ול-Drive עד שיישמר לקוח Google והחשבון יחובר שוב.",
-    "Close": "סגירה"
+    "Close": "סגירה",
+    "📲 WhatsApp business number": "📲 מספר WhatsApp עסקי",
+    "Give your agents their own official WhatsApp business number — no QR and no personal phone. Everyone who messages it talks to the agent you choose.": "תנו לסוכנים שלכם מספר WhatsApp עסקי רשמי משלהם — בלי QR ובלי טלפון אישי. כל מי ששולח אליו הודעה מדבר עם הסוכן שתבחרו.",
+    "WhatsApp business numbers aren't available on this server yet.": "מספרי WhatsApp עסקיים עדיין לא זמינים בשרת הזה.",
+    "Get a WhatsApp number": "קבלת מספר WhatsApp",
+    "All WhatsApp numbers on this server are taken. Ask the Whaser operator to add another.": "כל מספרי ה-WhatsApp בשרת הזה תפוסים. בקשו ממפעיל Whaser להוסיף עוד אחד.",
+    "Your WhatsApp number: {0}": "מספר ה-WhatsApp שלכם: {0}",
+    "This is Twilio's test number. Before messaging it, each person sends “{0}” to it once (and again every 3 days).": "זה מספר הבדיקה של Twilio. לפני ששולחים אליו הודעה, כל אדם שולח אליו פעם אחת “{0}” (ושוב כל 3 ימים).",
+    "Open WhatsApp to join": "פתיחת WhatsApp להצטרפות",
+    "This is Twilio's test number. Before messaging it, each person sends the Sandbox join message to it once (and again every 3 days) — ask the Whaser operator for it.": "זה מספר הבדיקה של Twilio. לפני ששולחים אליו הודעה, כל אדם שולח אליו פעם אחת את הודעת ההצטרפות ל-Sandbox (ושוב כל 3 ימים) — בקשו אותה ממפעיל Whaser.",
+    "Answered by <b>{0}</b>": "עונה: <b>{0}</b>",
+    "No agent answers this number yet — open an agent and click “📲 Answer on WhatsApp”.": "עדיין אף סוכן לא עונה במספר הזה — פתחו סוכן ולחצו על “📲 מענה ב-WhatsApp”.",
+    "Last message received: {0} from {1}": "ההודעה האחרונה התקבלה: {0} מ-{1}",
+    "No message received yet — send one to the number from WhatsApp to try it.": "עדיין לא התקבלה הודעה — שלחו הודעה למספר מ-WhatsApp כדי לנסות.",
+    "Last reply sent: {0}": "התשובה האחרונה נשלחה: {0}",
+    "Release number": "שחרור המספר",
+    "Release this number?": "לשחרר את המספר הזה?",
+    "Your agents stop answering {0}, and another workspace can take it.": "הסוכנים שלכם יפסיקו לענות ב-{0}, וסביבת עבודה אחרת תוכל לקחת אותו.",
+    "Release": "שחרור",
+    "📲 Answer on WhatsApp ({0})": "📲 מענה ב-WhatsApp ({0})",
+    "✓ Answering on WhatsApp ({0})": "✓ עונה ב-WhatsApp ({0})",
+    "Switch the WhatsApp number?": "להעביר את מספר ה-WhatsApp?",
+    "“{0}” answers {1} now. Make this agent answer it instead?": "“{0}” עונה כרגע ב-{1}. להעביר את המענה לסוכן הזה?",
+    "Switch": "העברה",
+    "Stop answering on WhatsApp?": "להפסיק לענות ב-WhatsApp?",
+    "Messages to {0} will go unanswered until an agent is chosen again.": "הודעות ל-{0} לא ייענו עד שייבחר סוכן שוב.",
+    "Stop answering": "הפסקת מענה",
+    "WhatsApp business number:": "מספר WhatsApp עסקי:",
+    "answers everyone who messages {0}": "עונה לכל מי ששולח הודעה ל-{0}",
+    "📲 Prefer an official business number?": "📲 מעדיפים מספר עסקי רשמי?",
+    "Get a WhatsApp business number in Settings — no QR and no personal phone. Everyone who messages it gets the agent you pick.": "קבלו מספר WhatsApp עסקי בהגדרות — בלי QR ובלי טלפון אישי. כל מי ששולח אליו הודעה מקבל את הסוכן שתבחרו.",
+    "⚙️ Get a WhatsApp number": "⚙️ קבלת מספר WhatsApp",
+    "Your workspace also has a WhatsApp business number: {0}.": "לסביבת העבודה שלכם יש גם מספר WhatsApp עסקי: {0}."
   } };
 let lang = localStorage.getItem('whaser_lang') || 'en';
 function t(s){ const d = I18N[lang]; return (d && d[s] != null) ? d[s] : s; }
@@ -359,6 +391,8 @@ async function api(path, method='GET', body){
 }
 function logout(){ token=null; user=null; localStorage.removeItem('whaser_token'); localStorage.removeItem('whaser_user'); render(); }
 function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// Isolate a phone number so "+972…" keeps its plus sign in front inside Hebrew (RTL) text.
+function ltr(s){ return '\u2066'+s+'\u2069'; }
 
 // Cadence units for scheduled triggers (singular/plural keys keep Hebrew agreement correct).
 const TIMING_UNITS = [
@@ -585,7 +619,7 @@ async function AgentsView(wrap){
       card.innerHTML = `<div class="row" style="justify-content:space-between"><b>${esc(a.name)}</b>
         <span class="badge ${a.status==='live'?'live':'paused'}">${t(a.status)}</span></div>
         <div class="muted" style="margin:6px 0">${esc(a.goal)}</div>
-        <div><span class="pill">${esc(a.tone)}</span><span class="pill">${esc(a.model)}</span><span class="pill">📱 ${esc(a.phoneNumberId)}</span></div>
+        <div><span class="pill">${esc(a.tone)}</span><span class="pill">${esc(a.model)}</span><span class="pill">📱 ${esc(a.phoneNumberId)}</span>${a.twilioNumber?`<span class="pill">📲 ${esc(ltr(a.twilioNumber))}</span>`:''}</div>
         <div class="muted" style="margin-top:8px;font-size:12.5px">${tf('Last activity: {0}', a.lastActivityAt? new Date(a.lastActivityAt).toLocaleString(locale()):'—')}</div>`;
       card.onclick = ()=>{ view='agent:'+a.id; render(); };
       grid.appendChild(card);
@@ -640,12 +674,14 @@ async function AgentDetailView(wrap, id){
       : `<div style="margin-top:10px muted"><b>${t('Workflow:')}</b> <span class="muted">${t('single agent')}</span></div>`}
     ${(a.spec.skills&&a.spec.skills.length)?`<div style="margin-top:10px"><b>${t('Skills:')}</b> ${a.spec.skills.map(s=>`<span class="pill" title="${esc(s.description)}">🧩 ${esc(s.name)}</span>`).join('')}</div>`:''}
     <div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?(`<b>${t('Listening on:')}</b> `+a.listenChats.map(c=>`<span class="pill">💬 ${esc(c.name)}</span>`).join('')):`<span class="muted"><b>${t('Listening on:')}</b> ${t('no chats selected (chosen during creation)')}</span>`}</div>
+    ${a.twilio&&a.twilio.answersHere?`<div style="margin-top:6px"><b>${t('WhatsApp business number:')}</b> ${esc(tf('answers everyone who messages {0}', ltr(a.twilio.number)))}</div>`:''}
     <div style="margin-top:6px" id="connline">${Object.keys(a.connections||{}).length?(`<b>${t('Google:')}</b> `+connectionPills(a.connections)):`<span class="muted"><b>${t('Google:')}</b> ${t('no Google connections')}</span>`}</div>
     <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?t('Pause'):t('Resume')}</button>
     <button class="ghost" id="showspec">${t('View AgentSpec')}</button>
     <button id="editchats">${t('✏️ Edit chats')}</button>
     <button id="editconns">${t('🔗 Google connections')}</button>
     <button id="answerself" class="${a.answerSelf?'primary':''}" title="${t('When on, the agent also replies to messages YOU send from your connected WhatsApp.')}">${a.answerSelf?t('🙋 Answer my own messages: On'):t('🙋 Answer my own messages: Off')}</button>
+    ${a.twilio&&a.twilio.configured ? `<button id="twiliowa" class="${a.twilio.answersHere?'primary':''}">${esc(a.twilio.answersHere?tf('✓ Answering on WhatsApp ({0})', ltr(a.twilio.number)):tf('📲 Answer on WhatsApp ({0})', ltr(a.twilio.number)))}</button>` : ''}
     ${whatsapp.configured ? `<button id="connectwa" class="${whatsapp.boundAgentId===a.id?'':'primary'}">${whatsapp.boundAgentId===a.id?t('✓ Cloud API connected'):tf('📲 Connect Cloud API ({0})', esc(whatsapp.phoneNumberId))}</button>` : ''}
     <button class="danger" id="delete" style="margin-inline-start:auto">${t('🗑 Delete agent')}</button></div>
     <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>
@@ -678,6 +714,16 @@ async function AgentDetailView(wrap, id){
     if (Object.entries(a.connections).some(([k,acc])=>!(gs.connected&&googleCovers(gs.granted,k,acc))))
       head.querySelector('#connline').appendChild($(`<div class="err" style="font-size:13px;margin-top:4px">${t("⚠ Google isn't connected with this access yet — open 🔗 Google connections.")}</div>`));
   }).catch(()=>{});
+  const tw = head.querySelector('#twiliowa');
+  if (tw) tw.onclick = async ()=>{
+    const on = !a.twilio.answersHere, num = ltr(a.twilio.number);
+    const ok = on
+      ? (!a.twilio.answeringAgentName || await confirmDialog({ title:t('Switch the WhatsApp number?'), message:tf('“{0}” answers {1} now. Make this agent answer it instead?', a.twilio.answeringAgentName, num), confirmLabel:t('Switch') }))
+      : await confirmDialog({ title:t('Stop answering on WhatsApp?'), message:tf('Messages to {0} will go unanswered until an agent is chosen again.', num), confirmLabel:t('Stop answering'), danger:true });
+    if (!ok) return;
+    tw.disabled=true;
+    try{ await api('/api/agents/'+id+'/twilio','POST',{ enabled:on }); render(); }
+    catch(e){ alert(e.message); tw.disabled=false; } };
   const cw = head.querySelector('#connectwa');
   if (cw && whatsapp.boundAgentId!==a.id) cw.onclick = async ()=>{ cw.disabled=true;
     try{ const r=await api('/api/agents/'+id+'/connect-whatsapp','POST'); whatsapp.boundAgentId=r.boundAgentId; render(); }
@@ -908,6 +954,16 @@ async function AgentDetailView(wrap, id){
 async function WhatsAppView(wrap){
   wrap.appendChild($(`<h1>${t('WhatsApp — link your number (QR)')}</h1>`));
   wrap.appendChild($(`<div class="card" style="border-color:#8a6d3b">${t('⚠️ <b>POC only.</b> This links your <i>personal</i> WhatsApp via the unofficial WhatsApp-Web protocol — against WhatsApp\'s ToS, with a real risk of the number being banned. Prefer a spare SIM. The Cloud API path is the production-safe option.')}</div>`));
+  const tw = $('<div></div>'); wrap.appendChild(tw);
+  api('/api/settings/twilio').then(ts=>{
+    if (!ts.available || (!ts.number && !ts.freeNumbers)) return;
+    tw.innerHTML = ts.number
+      ? `<div class="card muted">📲 ${esc(tf('Your workspace also has a WhatsApp business number: {0}.', ltr(ts.number)))}</div>`
+      : `<div class="card"><b>${t('📲 Prefer an official business number?')}</b>
+          <div class="muted" style="margin:4px 0 8px">${t('Get a WhatsApp business number in Settings — no QR and no personal phone. Everyone who messages it gets the agent you pick.')}</div>
+          <button>${t('⚙️ Get a WhatsApp number')}</button></div>`;
+    const b = tw.querySelector('button'); if (b) b.onclick = ()=>{ view='settings'; render(); };
+  }).catch(()=>{});
   const card = $('<div class="card"></div>');
   wrap.appendChild(card);
   async function refresh(){
@@ -943,11 +999,11 @@ async function ActivityView(wrap){
     if(!r.events.length){ card.innerHTML=`<span class="muted">${t('No activity yet. Use an agent\'s simulator, or message a linked chat.')}</span>`; return; }
     card.innerHTML = r.events.map(e=>{
       const when=new Date(e.ts).toLocaleTimeString(locale());
-      const ch = e.channel==='whatsapp'?'📱':(e.channel==='timer'?'⏰':'🧪');
+      const ch = e.channel==='whatsapp'?'📱':(e.channel==='twilio'?'📲':(e.channel==='timer'?'⏰':'🧪'));
       const route = e.blocked ? '<span class="err">⛔ '+esc(e.blocked)+'</span>' : (e.routedTo && e.routedTo!=='default' ? '🧭 '+esc(e.routedTo) : `<span class="muted">${t('default')}</span>`);
       const reply = e.reply ? esc(e.reply.slice(0,200)) : `<span class="muted">${t('(no reply)')}</span>`;
       return `<div style="border-bottom:1px solid var(--line);padding:8px 0">
-        <div class="muted" style="font-size:12px">${when} · ${ch} <b>${esc(e.agentName)}</b> · ${tf('from {0}', esc(e.from))}${e.chatId?(' · '+esc(String(e.chatId).split('@')[0])):''} · ${route}</div>
+        <div class="muted" style="font-size:12px">${when} · ${ch} <b>${esc(e.agentName)}</b> · ${tf('from {0}', esc(ltr(e.from)))}${e.chatId&&e.chatId!==e.from?(' · '+esc(ltr(String(e.chatId).split('@')[0]))):''} · ${route}</div>
         <div style="margin-top:2px">“${esc(e.text.slice(0,200))}”</div>
         <div style="margin-top:2px">↳ ${reply}</div></div>`;
     }).join('');
@@ -1180,11 +1236,67 @@ function openGoogleSettingsDialog(onChange){
   buildGoogleSettings(body, ()=>{ onChange&&onChange(); });
 }
 
+// The workspace's WhatsApp business number, given out from the operator's Twilio account — one click,
+// nothing to copy from an outside console. The status block refreshes on its own so the owner sees their
+// test message arrive.
+async function buildTwilioSettings(container){
+  container.innerHTML=`<span class="muted">${t('Loading…')}</span>`;
+  let s; try{ s=await api('/api/settings/twilio'); }catch(e){ container.innerHTML=`<div class="err">${esc(e.message)}</div>`; return; }
+  const when=(ms)=>new Date(ms).toLocaleString(locale());
+  function statusHtml(){
+    if(!s.number) return '';
+    const a=s.activity||{};
+    return [
+      s.agentName ? `<div>${tf('Answered by <b>{0}</b>', esc(s.agentName))}</div>`
+        : `<div class="err">${t('No agent answers this number yet — open an agent and click “📲 Answer on WhatsApp”.')}</div>`,
+      `<div class="muted" style="margin-top:4px">${a.lastInboundAt ? esc(tf('Last message received: {0} from {1}', when(a.lastInboundAt), ltr(a.lastInboundFrom||''))) : t('No message received yet — send one to the number from WhatsApp to try it.')}</div>`,
+      a.lastReplyAt ? `<div class="muted">${esc(tf('Last reply sent: {0}', when(a.lastReplyAt)))}</div>` : '',
+      a.lastProblem ? `<div class="err" style="margin-top:4px" dir="auto">⚠ ${esc(a.lastProblem.message)} <span class="muted">(${esc(when(a.lastProblem.at))})</span></div>` : '',
+    ].join('');
+  }
+  function paint(note){
+    let body;
+    if(!s.available) body=`<div class="muted" style="margin-top:8px">${t("WhatsApp business numbers aren't available on this server yet.")}</div>`;
+    else if(!s.number) body = s.freeNumbers>0
+      ? `<div class="row" style="margin-top:12px;flex-wrap:wrap"><button class="primary tw-claim">${t('Get a WhatsApp number')}</button><span class="tw-msg" style="font-size:13.5px">${note||''}</span></div>`
+      : `<div class="err" style="margin-top:8px">${t('All WhatsApp numbers on this server are taken. Ask the Whaser operator to add another.')}</div>`;
+    else body=`<div style="margin-top:12px;font-size:16px"><b>${esc(tf('Your WhatsApp number: {0}', ltr(s.number)))}</b></div>
+      ${s.sandbox ? (s.sandboxJoin
+        ? `<div class="muted" style="margin-top:6px">${esc(tf("This is Twilio's test number. Before messaging it, each person sends “{0}” to it once (and again every 3 days).", s.sandboxJoin.text))}</div>
+           <a href="${esc(s.sandboxJoin.link)}" target="_blank" rel="noopener"><button style="margin-top:8px">${t('Open WhatsApp to join')}</button></a>`
+        : `<div class="muted" style="margin-top:6px">${t("This is Twilio's test number. Before messaging it, each person sends the Sandbox join message to it once (and again every 3 days) — ask the Whaser operator for it.")}</div>`) : ''}
+      <div class="tw-status" style="margin-top:12px">${statusHtml()}</div>
+      <div class="row" style="margin-top:12px;flex-wrap:wrap"><button class="ghost tw-release">${t('Release number')}</button><span class="tw-msg" style="font-size:13.5px">${note||''}</span></div>`;
+    container.innerHTML=`<h2 style="margin-bottom:6px">${t('📲 WhatsApp business number')}</h2>
+      ${s.problem?`<div class="card" style="border-color:var(--danger);margin:6px 0 10px;padding:10px 12px"><span class="err">⚠ ${esc(s.problem)}</span></div>`:''}
+      <div class="muted">${t('Give your agents their own official WhatsApp business number — no QR and no personal phone. Everyone who messages it talks to the agent you choose.')}</div>
+      ${body}`;
+    const q=(c)=>container.querySelector(c);
+    const msg=(html)=>{ const m=q('.tw-msg'); if(m) m.innerHTML=html; };
+    const claim=q('.tw-claim');
+    if(claim) claim.onclick=async()=>{ claim.disabled=true;
+      try{ s=await api('/api/settings/twilio/claim','POST'); paint(); }
+      catch(e){ msg(`<span class="err">${esc(e.message)}</span>`); claim.disabled=false; } };
+    const rel=q('.tw-release');
+    if(rel) rel.onclick=async()=>{ const ok=await confirmDialog({ title:t('Release this number?'), message:tf('Your agents stop answering {0}, and another workspace can take it.', ltr(s.number)), confirmLabel:t('Release'), danger:true });
+      if(!ok) return; rel.disabled=true;
+      try{ s=await api('/api/settings/twilio','DELETE'); paint(); }catch(e){ msg(`<span class="err">${esc(e.message)}</span>`); rel.disabled=false; } };
+  }
+  paint();
+  // Refresh just the status block; stops once the page is left.
+  const timer=setInterval(async()=>{
+    if(!container.isConnected){ clearInterval(timer); return; }
+    try{ const r=await api('/api/settings/twilio'); if(r.number===s.number){ s=r; const st=container.querySelector('.tw-status'); if(st) st.innerHTML=statusHtml(); } }catch{ /* keep the last status */ }
+  }, 4000);
+}
+
 async function SettingsView(wrap){
   wrap.appendChild($(`<h1>${t('Settings')}</h1>`));
   wrap.appendChild($(`<div class="muted" style="margin-bottom:12px">${esc(tf('Settings for your workspace ({0}).', user.tenantName||''))}</div>`));
   const card=$('<div class="card"></div>'); wrap.appendChild(card);
   buildGoogleSettings(card);
+  const twilioCard=$('<div class="card"></div>'); wrap.appendChild(twilioCard);
+  buildTwilioSettings(twilioCard);
 }
 
 async function CreateView(wrap){

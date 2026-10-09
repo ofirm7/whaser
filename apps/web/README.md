@@ -98,6 +98,67 @@ Scopes requested: `gmail.readonly` / `gmail.modify`, `calendar.events.readonly` 
 `drive.readonly` / `drive` (read / read & write). The Gmail and Drive scopes are Google *restricted*
 scopes (Calendar's are *sensitive*) — fine for test users, but a public app needs Google's verification.
 
+## WhatsApp business numbers (Twilio)
+
+Instead of QR-linking a personal phone, a workspace can give its agents a real WhatsApp **business
+number**, served through the operator's **Twilio** account — the Twilio Sandbox to try it, or registered
+WhatsApp senders. Workspaces never see Twilio: in **⚙️ Settings → 📲 WhatsApp business number** they
+click **Get a WhatsApp number** (they're given a free one from the operator's list), then open the agent
+that should answer and click **📲 Answer on WhatsApp**. Everyone who messages the number talks to that
+agent, through the same pipeline as every channel: cost/abuse breaker, billing gate, conversation memory,
+tools, activity log. A paused agent stays silent. **Release number** hands it back for another workspace.
+
+### Operator setup (once per server)
+
+1. In the [Twilio Console](https://console.twilio.com/), copy the account's **Account SID** (`AC…`) and
+   **Auth Token**.
+2. Get a WhatsApp sender. To try it right away, use the Sandbox: open the **Try WhatsApp** page
+   (Messaging → Try it out → Send a WhatsApp message) and note its number, **+1 415 523 8886**, and its
+   join code (`join <two-words>`). For production, register your own WhatsApp senders in Twilio.
+3. Put them in `apps/web/.env` and restart Whaser:
+
+   ```bash
+   TWILIO_ACCOUNT_SID=AC...
+   TWILIO_AUTH_TOKEN=...
+   TWILIO_WHATSAPP_NUMBERS=+14155238886          # one or more, comma-separated — one per workspace
+   TWILIO_SANDBOX_JOIN_CODE=join two-words       # optional (Sandbox): shown to workspaces with a one-tap link
+   TWILIO_WEBHOOK_BASE_URL=https://whaser.example.com   # optional: only if a proxy hides the public address
+   ```
+
+   On startup the log confirms the account (`[twilio] account "…" (Trial, active)`) or says Twilio rejected
+   the credentials, and prints the webhook URL to use.
+4. In Twilio, set **"When a message comes in"** to `<public URL>/api/twilio/whatsapp`, method **POST** —
+   for the Sandbox under Sandbox settings → Sandbox configuration; for your own senders on each sender (or
+   its Messaging Service). One URL serves every number.
+
+Twilio must be able to reach Whaser: a public IP or domain works (Twilio accepts `http://`, but `https://`
+is recommended); `localhost` and private addresses don't.
+
+Sandbox caveat: everyone who messages the Sandbox number has to send its join code to it first, and a
+Sandbox session expires three days after joining. With `TWILIO_SANDBOX_JOIN_CODE` set, Settings shows the
+code and an **Open WhatsApp to join** button (a `wa.me` link with the message typed in).
+
+### How it works
+
+- Every post is checked against **`X-Twilio-Signature`** (HMAC-SHA1 with the operator's Auth Token); a
+  bad signature gets 403. Each message is routed to the workspace holding the number it was sent to.
+- Twilio is answered immediately with empty TwiML; the agent's reply is sent afterwards through Twilio's
+  REST API (agents can take longer than Twilio's 15-second webhook timeout). Replies over Twilio's
+  1600-character limit go out as several messages. A re-posted webhook is not answered twice, and one
+  customer's messages are answered in order.
+- Images and PDFs a customer sends are passed to the agent (≤5MB); text files are inlined; voice notes and
+  videos are acknowledged.
+- Each reply carries a **status callback** (`/api/twilio/status`, no Twilio setup needed), so failed
+  deliveries show up in the workspace's Settings and Activity feed with the reason — e.g. **63016**
+  (outside WhatsApp's 24-hour window: a business can only send free-form messages within 24 hours of the
+  customer's last message) or **63015** (the recipient hasn't joined the Sandbox).
+- Which workspace holds which number (and its answering agent) is kept in the gitignored
+  `.data/twilio-lines.json`. Removing a number from `TWILIO_WHATSAPP_NUMBERS` frees it.
+
+Not covered yet: proactive messages outside the 24-hour window (WhatsApp requires pre-approved
+templates), so scheduled triggers and the agent's own "send a message" tool keep using the QR-linked
+channel.
+
 ## Going to full production (LibreChat fork)
 
 The demo's direct Claude runtime is the `@anthropic-ai/sdk` fallback path. For the full system,
