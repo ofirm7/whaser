@@ -23,7 +23,7 @@ Claude + MCP agent runtime, and the chat/agent UI. Whaser adds, in separate modu
 
 | Concern | Choice |
 | --- | --- |
-| WhatsApp transport | Meta **Business Cloud API**, direct (non-personal business identity; webhook-based, headless-friendly) |
+| WhatsApp transport | Meta **Business Cloud API**, direct (non-personal business identity; webhook-based, headless-friendly) — or **Twilio WhatsApp** (the operator's Twilio numbers, one per workspace, in the demo app) |
 | Foundation | Fork of **LibreChat** v0.8.6 |
 | AI core | **Anthropic Claude** — Sonnet 4.6 (interview + replies), Opus 4.8 (spec synthesis), Haiku 4.5 (classification) |
 | Auth / tenancy | **lldap** directory (LDAP) + multi-tenant scoping |
@@ -62,7 +62,7 @@ Phased POC build — details in [`docs/ROADMAP.md`](./docs/ROADMAP.md).
 ```
 deploy/      docker-compose, Caddyfile, librechat.yaml, .env.example
 docs/        ARCHITECTURE.md, ROADMAP.md, SETUP.md, AI-FEATURES.md, PHASE3-BRIDGE.md, PHASE4-WIZARD.md
-packages/    whatsapp-gateway (Cloud API gateway + LibreChat bridge), agent-builder (wizard backend)
+packages/    whatsapp-gateway (Cloud API + Twilio gateway, LibreChat bridge), agent-builder (wizard backend)
 apps/        web (self-contained demo GUI — runs the real backends with stubbed LLM + WhatsApp)
 schemas/     agent-spec.schema.json   (the AgentSpec the wizard emits)
 librechat/   LibreChat v0.8.6 (git submodule; the fork base)

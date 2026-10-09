@@ -7,6 +7,9 @@ import { AppState } from './store';
 import { callbackPage, redirectUriProblem, suggestConnections } from './google';
 import type { TuningSuggestion } from '../../../packages/agent-builder/src/index';
 import { createWebhookRouter } from '../../../packages/whatsapp-gateway/src/express';
+import { parseTwilioInbound, parseTwilioStatus, verifyTwilioSignature } from '../../../packages/whatsapp-gateway/src/twilio';
+import type { TwilioParams } from '../../../packages/whatsapp-gateway/src/twilio';
+import { TWILIO_WEBHOOK_PATH, TWILIO_STATUS_PATH } from './twilio';
 
 interface SessionUser {
   username: string;
@@ -51,6 +54,7 @@ const agentSummary = (a: ReturnType<AppState['listAgents']>[number]) => ({
   model: a.spec.model_assignment,
   createdAt: a.createdAt,
   lastActivityAt: a.lastActivityAt,
+  twilioNumber: state.twilioNumberOf(a),
 });
 
 const catalogSummary = (e: ReturnType<AppState['listCatalog']>[number]) => ({
@@ -65,13 +69,23 @@ const catalogSummary = (e: ReturnType<AppState['listCatalog']>[number]) => ({
   goal: e.spec.goal,
 });
 
+/** The scheme + host the app is being used at (honours X-Forwarded-Proto/Host from a proxy). */
+function requestBase(req: Request): string {
+  const proto = String(req.header('x-forwarded-proto') ?? req.protocol).split(',')[0].trim();
+  const host = String(req.header('x-forwarded-host') ?? req.get('host') ?? '').split(',')[0].trim();
+  return `${proto}://${host}`;
+}
+
 /** Where Google sends the OAuth pop-up back to — must be registered on the Google OAuth client.
  *  GOOGLE_REDIRECT_URI pins it; otherwise it follows the URL the app is being used at. */
 function googleRedirectUri(req: Request): string {
   if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
-  const proto = String(req.header('x-forwarded-proto') ?? req.protocol).split(',')[0].trim();
-  const host = String(req.header('x-forwarded-host') ?? req.get('host') ?? '').split(',')[0].trim();
-  return `${proto}://${host}/api/google/callback`;
+  return `${requestBase(req)}/api/google/callback`;
+}
+
+/** The public base URL Twilio calls Whaser at: TWILIO_WEBHOOK_BASE_URL when pinned, else the request's. */
+function publicBase(req: Request): string {
+  return process.env.TWILIO_WEBHOOK_BASE_URL?.replace(/\/+$/, '') || requestBase(req);
 }
 
 const GOOGLE_NONCE_COOKIE = 'whaser_google_nonce';
@@ -93,6 +107,55 @@ if (webhookDeps) {
   app.use('/api/whatsapp/webhook', createWebhookRouter(webhookDeps));
   console.log('WhatsApp webhook mounted at /api/whatsapp/webhook');
 }
+
+// Twilio WhatsApp webhooks — form-encoded and signed (X-Twilio-Signature) with the operator's Auth
+// Token, one URL for all of the operator's numbers; each message is routed to the workspace holding the
+// number it was sent to. An inbound message is acknowledged at once with empty TwiML and answered in the
+// background through the REST API, since an agent's reply can outlast Twilio's 15-second webhook timeout.
+const TWIML_EMPTY = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
+const twilioForm = express.urlencoded({ extended: false, limit: '256kb' });
+
+/** The params + public base of a genuine Twilio webhook, or null after answering 404/403. */
+function twilioWebhook(req: Request, res: Response): { params: TwilioParams; base: string } | null {
+  const platform = state.twilio.platform;
+  if (!platform) {
+    res.sendStatus(404);
+    return null;
+  }
+  const params = (req.body ?? {}) as TwilioParams;
+  const base = publicBase(req);
+  // The signature covers the exact URL configured in Twilio; try it as seen through a proxy and directly.
+  const urls = [base + req.originalUrl, `${req.protocol}://${req.get('host')}${req.originalUrl}`];
+  if (!verifyTwilioSignature(platform.authToken, req.header('x-twilio-signature'), urls, params)) {
+    console.warn(`[twilio] rejected a webhook whose signature didn't match (checked ${[...new Set(urls)].join(' , ')}) — the URL in Twilio must be exactly ${base}${TWILIO_WEBHOOK_PATH} and TWILIO_AUTH_TOKEN the account's current token`);
+    res.sendStatus(403);
+    return null;
+  }
+  return { params, base };
+}
+
+app.post(TWILIO_WEBHOOK_PATH, twilioForm, (req: Request, res: Response) => {
+  const hook = twilioWebhook(req, res);
+  if (!hook) return;
+  res.type('text/xml').send(TWIML_EMPTY);
+  const inbound = parseTwilioInbound(hook.params); // null for an SMS or anything else that isn't WhatsApp
+  if (!inbound) return;
+  const tenantId = state.twilio.tenantOf(inbound.to);
+  if (!tenantId) {
+    console.warn(`[twilio] a WhatsApp message to ${inbound.to} arrived, but no workspace has that number yet`);
+    return;
+  }
+  void state.handleTwilioInbound(tenantId, inbound, hook.base);
+});
+
+app.post(TWILIO_STATUS_PATH, twilioForm, (req: Request, res: Response) => {
+  const hook = twilioWebhook(req, res);
+  if (!hook) return;
+  res.sendStatus(204);
+  const status = parseTwilioStatus(hook.params);
+  const tenantId = status?.from ? state.twilio.tenantOf(status.from) : null;
+  if (status && tenantId) state.handleTwilioStatus(tenantId, status);
+});
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -261,7 +324,7 @@ app.get('/api/agents/:id', wrap(async (req, res, auth) => {
     res.sendStatus(404);
     return;
   }
-  res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername, listenChats: a.listenChats, triggers: a.triggers ?? [], answerSelf: a.answerSelf === true, connections: a.connections ?? {} });
+  res.json({ ...agentSummary(a), spec: a.spec, ownerUsername: a.ownerUsername, listenChats: a.listenChats, triggers: a.triggers ?? [], answerSelf: a.answerSelf === true, connections: a.connections ?? {}, twilio: state.twilioLine(auth.tenantId, a.id) });
 }));
 
 app.delete('/api/agents/:id', wrap(async (req, res, auth) => {
@@ -367,6 +430,27 @@ app.delete('/api/settings/google', wrap(async (req, res, auth) => {
   res.json(googleSettings(req, auth.tenantId));
 }));
 
+// --- Settings: the workspace's WhatsApp business number, given out from the operator's Twilio account ---
+const twilioSettings = (tenantId: string) => {
+  const s = state.twilio.settings(tenantId);
+  const agent = s.agentId ? state.getAgent(s.agentId, tenantId) : undefined;
+  return { ...s, agentId: agent?.id ?? null, agentName: agent?.spec.agent_name ?? null };
+};
+
+app.get('/api/settings/twilio', wrap(async (_req, res, auth) => {
+  res.json(twilioSettings(auth.tenantId));
+}));
+
+app.post('/api/settings/twilio/claim', wrap(async (_req, res, auth) => {
+  state.twilio.claim(auth.tenantId, auth.username);
+  res.json(twilioSettings(auth.tenantId));
+}));
+
+app.delete('/api/settings/twilio', wrap(async (_req, res, auth) => {
+  state.releaseTwilio(auth.tenantId);
+  res.json(twilioSettings(auth.tenantId));
+}));
+
 // --- QR-linked personal WhatsApp (POC) — each user links their OWN account (tenant-scoped) ---
 app.post('/api/wa/link', wrap(async (_req, res, auth) => {
   await state.startPersonalLink(auth.tenantId);
@@ -450,6 +534,13 @@ app.post('/api/agents/:id/connections', wrap(async (req, res, auth) => {
   const a = state.setConnections(req.params.id, auth.tenantId, connections);
   if (!a) { res.sendStatus(404); return; }
   res.json({ id: a.id, connections: a.connections ?? {} });
+}));
+
+// Make this agent the one answering the workspace's WhatsApp business number (or stop it answering).
+app.post('/api/agents/:id/twilio', wrap(async (req, res, auth) => {
+  const { enabled } = (req.body ?? {}) as { enabled?: unknown };
+  const a = state.setTwilioAgent(req.params.id, auth.tenantId, enabled === true);
+  res.json(state.twilioLine(auth.tenantId, a.id));
 }));
 
 app.post('/api/agents/:id/answer-self', wrap(async (req, res, auth) => {
@@ -646,4 +737,8 @@ app.get('*', (_req: Request, res: Response) => {
 const port = Number(process.env.PORT ?? 8080);
 app.listen(port, '0.0.0.0', () => {
   console.log(`Whaser demo GUI on http://0.0.0.0:${port}  (login: alice/password, bob/password, carol/password)`);
+  if (state.twilio.platform) {
+    const base = process.env.TWILIO_WEBHOOK_BASE_URL?.replace(/\/+$/, '') || `http://<this server's public address>:${port}`;
+    console.log(`[twilio] in Twilio, set "When a message comes in" (POST) for ${state.twilio.platform.numbers.join(', ')} to ${base}${TWILIO_WEBHOOK_PATH}`);
+  }
 });

@@ -27,13 +27,14 @@ sidecar (the Phase 3 integration decision).
 | `src/webhook.ts` | Framework-agnostic `verifyChallenge` + `handleInbound`. |
 | `src/express.ts` | `createWebhookRouter` (mount at `/api/whatsapp/webhook`). |
 | `src/index.ts` | Standalone echo server for local smoke-testing. |
+| `src/twilio.ts` | Twilio WhatsApp transport: `X-Twilio-Signature` verification, inbound/status webhook parsing, `TwilioWhatsAppClient` (REST send, 1600-char splitting, media download). |
 
 ## Develop
 
 ```bash
 npm install
 npm run typecheck     # tsc --noEmit
-npm test              # vitest — 20 tests (signature, queue, webhook, worker)
+npm test              # vitest (signature, queue, webhook, worker, Twilio, …)
 ```
 
 ## Local smoke test
