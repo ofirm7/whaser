@@ -72,6 +72,8 @@
   .chatrow > input[type=checkbox] { width:17px; height:17px; min-width:17px; margin:0; accent-color:var(--accent); justify-self:center; cursor:pointer; }
   .chatname { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-size:14.5px; font-weight:500; }
   .chatbadge { text-align:center; font-size:13px; color:var(--muted); }
+  .pill .chipx { background:transparent; border:none; padding:0; padding-inline-start:6px; margin:0; color:var(--muted); font-size:12px; cursor:pointer; }
+  .pill .chipx:hover { color:var(--danger); }
   .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; padding:18px; z-index:1000; }
   .modal { width:400px; max-width:100%; max-height:calc(100vh - 36px); overflow-y:auto; margin:0; }
   .modal.wide { width:560px; }
@@ -328,6 +330,40 @@ const I18N = { he: {
     "Remove": "הסרה",
     "Saving…": "שומר…",
     "Close": "סגירה",
+    "👥 Join a group": "👥 הצטרפות לקבוצה",
+    "👥 Add to a WhatsApp group": "👥 הוספה לקבוצת WhatsApp",
+    "Paste the group's invite link (in WhatsApp: group info → Invite via link). Your linked WhatsApp joins the group, and the agent answers there.": "הדביקו את קישור ההזמנה של הקבוצה (ב-WhatsApp: פרטי הקבוצה ← הזמנה באמצעות קישור). ה-WhatsApp המקושר שלכם יצטרף לקבוצה, והסוכן יענה שם.",
+    "Preview": "תצוגה מקדימה",
+    "Groups are joined by your linked WhatsApp account — WhatsApp business numbers can't join groups. Link a WhatsApp account first; a spare number works best, since that's how the agent appears in the group.": "הצטרפות לקבוצות נעשית דרך חשבון ה-WhatsApp המקושר שלכם — מספרי WhatsApp עסקיים לא יכולים להצטרף לקבוצות. קשרו קודם חשבון WhatsApp; מספר נוסף הוא הבחירה הטובה ביותר, כי כך הסוכן יופיע בקבוצה.",
+    "Link a WhatsApp account": "קישור חשבון WhatsApp",
+    "Looking up the group…": "מחפש את הקבוצה…",
+    "Your linked WhatsApp is already in this group.": "ה-WhatsApp המקושר שלכם כבר נמצא בקבוצה הזו.",
+    "A group admin has to approve the join request.": "מנהל הקבוצה צריך לאשר את בקשת ההצטרפות.",
+    "⚠ Only admins can send messages in this group — the agent can't reply there unless an admin makes it one.": "⚠ רק מנהלים יכולים לשלוח הודעות בקבוצה הזו — הסוכן לא יוכל לענות שם אלא אם מנהל יהפוך אותו למנהל.",
+    "Answer in this group": "מענה בקבוצה הזו",
+    "Join and answer here": "הצטרפות ומענה כאן",
+    "Add this group": "הוספת הקבוצה הזו",
+    "Join group": "הצטרפות לקבוצה",
+    "{0} members": "{0} משתתפים",
+    "Joining…": "מצטרף…",
+    "Join request sent. Once a group admin approves it, the group appears in your chats — then choose it under ✏️ Edit chats.": "בקשת ההצטרפות נשלחה. אחרי שמנהל הקבוצה יאשר אותה, הקבוצה תופיע בצ׳אטים שלכם — ואז בחרו אותה תחת ✏️ עריכת צ׳אטים.",
+    "✓ Joined “{0}” — the agent answers there now.": "✓ הצטרפתם ל-“{0}” — הסוכן עונה שם עכשיו.",
+    "✓ Joined “{0}”.": "✓ הצטרפתם ל-“{0}”.",
+    "Leave this group": "יציאה מהקבוצה הזו",
+    "Stop answering this chat": "הפסקת מענה בצ׳אט הזה",
+    "Leave this group?": "לצאת מהקבוצה הזו?",
+    "Your linked WhatsApp leaves “{0}”, and no agent answers there any more. To come back you'll need a new invite link.": "ה-WhatsApp המקושר שלכם יצא מ-“{0}”, ואף סוכן לא יענה שם יותר. כדי לחזור תצטרכו קישור הזמנה חדש.",
+    "🚪 Leave group": "🚪 יציאה מהקבוצה",
+    "Stop answering this chat?": "להפסיק לענות בצ׳אט הזה?",
+    "“{0}” stays in your WhatsApp; this agent just stops answering it.": "“{0}” נשאר ב-WhatsApp שלכם; הסוכן הזה פשוט מפסיק לענות בו.",
+    "👥 Not in the group yet? Join with an invite link": "👥 עדיין לא בקבוצה? הצטרפו עם קישור הזמנה",
+    "Groups are joined by your linked WhatsApp account — WhatsApp business numbers can't join groups. Link a WhatsApp account on the WhatsApp page first.": "הצטרפות לקבוצות נעשית דרך חשבון ה-WhatsApp המקושר שלכם — מספרי WhatsApp עסקיים לא יכולים להצטרף לקבוצות. קשרו קודם חשבון WhatsApp בעמוד ה-WhatsApp.",
+    "Paste a WhatsApp group invite link — it looks like https://chat.whatsapp.com/… (in WhatsApp: group info → Invite via link).": "הדביקו קישור הזמנה לקבוצת WhatsApp — הוא נראה כך: https://chat.whatsapp.com/… (ב-WhatsApp: פרטי הקבוצה ← הזמנה באמצעות קישור).",
+    "This invite link isn't valid any more — it may have been reset by a group admin. Ask for a fresh link.": "קישור ההזמנה הזה כבר לא תקף — ייתכן שמנהל הקבוצה איפס אותו. בקשו קישור חדש.",
+    "WhatsApp won't let this account open this group (an admin may have removed it before). Ask an admin to add it directly.": "WhatsApp לא מאפשר לחשבון הזה לפתוח את הקבוצה (ייתכן שמנהל הסיר אותו בעבר). בקשו ממנהל להוסיף אותו ישירות.",
+    "WhatsApp won't let this account join this group (an admin may have removed it before). Ask an admin to add it directly.": "WhatsApp לא מאפשר לחשבון הזה להצטרף לקבוצה (ייתכן שמנהל הסיר אותו בעבר). בקשו ממנהל להוסיף אותו ישירות.",
+    "This group is full.": "הקבוצה הזו מלאה.",
+    "Your WhatsApp isn't connected right now — open the WhatsApp page and link it, then try again.": "ה-WhatsApp שלכם לא מחובר כרגע — פתחו את עמוד ה-WhatsApp וקשרו אותו, ואז נסו שוב.",
     "📲 WhatsApp business number": "📲 מספר WhatsApp עסקי",
     "Give your agents their own official WhatsApp business number — no QR and no personal phone. Everyone who messages it talks to the agent you choose.": "תנו לסוכנים שלכם מספר WhatsApp עסקי רשמי משלהם — בלי QR ובלי טלפון אישי. כל מי ששולח אליו הודעה מדבר עם הסוכן שתבחרו.",
     "WhatsApp business numbers aren't available on this server yet.": "מספרי WhatsApp עסקיים עדיין לא זמינים בשרת הזה.",
@@ -666,12 +702,14 @@ async function AgentDetailView(wrap, id){
          <div style="margin-top:4px">${a.spec.sub_agents.map(s=>`<span class="pill">🤖 ${esc(s.name)}${s.tool_names.length?(' ['+s.tool_names.map(esc).join(', ')+']'):''}</span>`).join('')}</div></div>`
       : `<div style="margin-top:10px muted"><b>${t('Workflow:')}</b> <span class="muted">${t('single agent')}</span></div>`}
     ${(a.spec.skills&&a.spec.skills.length)?`<div style="margin-top:10px"><b>${t('Skills:')}</b> ${a.spec.skills.map(s=>`<span class="pill" title="${esc(s.description)}">🧩 ${esc(s.name)}</span>`).join('')}</div>`:''}
-    <div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?(`<b>${t('Listening on:')}</b> `+a.listenChats.map(c=>`<span class="pill">💬 ${esc(c.name)}</span>`).join('')):`<span class="muted"><b>${t('Listening on:')}</b> ${t('no chats selected (chosen during creation)')}</span>`}</div>
+    <div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?(`<b>${t('Listening on:')}</b> `+a.listenChats.map(c=>{ const g=String(c.id).endsWith('@g.us');
+      return `<span class="pill">${g?'👥':'💬'} <span dir="auto">${esc(c.name)}</span><button class="chipx" data-leave="${esc(c.id)}" data-name="${esc(c.name)}" title="${esc(g?t('Leave this group'):t('Stop answering this chat'))}" aria-label="${esc(g?t('Leave this group'):t('Stop answering this chat'))}">${g?'🚪':'✕'}</button></span>`; }).join('')):`<span class="muted"><b>${t('Listening on:')}</b> ${t('no chats selected (chosen during creation)')}</span>`}</div>
     ${a.twilio&&a.twilio.answersHere?`<div style="margin-top:6px"><b>${t('WhatsApp business number:')}</b> ${esc(tf('answers everyone who messages {0}', ltr(a.twilio.number)))}</div>`:''}
     <div style="margin-top:6px" id="connline">${Object.keys(a.connections||{}).length?(`<b>${t('Google:')}</b> `+connectionPills(a.connections)):`<span class="muted"><b>${t('Google:')}</b> ${t('no Google connections')}</span>`}</div>
     <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?t('Pause'):t('Resume')}</button>
     <button class="ghost" id="showspec">${t('View AgentSpec')}</button>
     <button id="editchats">${t('✏️ Edit chats')}</button>
+    <button id="joingroup">${t('👥 Join a group')}</button>
     <button id="editconns">${t('🔗 Google connections')}</button>
     <button id="answerself" class="${a.answerSelf?'primary':''}" title="${t('When on, the agent also replies to messages YOU send from your connected WhatsApp.')}">${a.answerSelf?t('🙋 Answer my own messages: On'):t('🙋 Answer my own messages: Off')}</button>
     ${a.twilio&&a.twilio.configured ? `<button id="twiliowa" class="${a.twilio.answersHere?'primary':''}">${esc(a.twilio.answersHere?tf('✓ Answering on WhatsApp ({0})', ltr(a.twilio.number)):tf('📲 Answer on WhatsApp ({0})', ltr(a.twilio.number)))}</button>` : ''}
@@ -679,6 +717,7 @@ async function AgentDetailView(wrap, id){
     <button class="danger" id="delete" style="margin-inline-start:auto">${t('🗑 Delete agent')}</button></div>
     <pre id="spec" style="display:none;margin-top:10px">${esc(JSON.stringify(a.spec,null,2))}</pre>
     <div id="chatedit"></div>
+    <div id="groupjoin"></div>
     <div id="connedit"></div>`;
   head.querySelector('#toggle').onclick = async ()=>{ await api('/api/agents/'+id+'/'+(a.status==='live'?'pause':'resume'),'POST'); render(); };
   head.querySelector('#answerself').onclick = async ()=>{ try{ await api('/api/agents/'+id+'/answer-self','POST',{ enabled: !a.answerSelf }); render(); }catch(e){ alert(e.message); } };
@@ -694,6 +733,20 @@ async function AgentDetailView(wrap, id){
     buildChatPicker(c, a.listenChats||[], t('Save chats'), async (chats, btn)=>{ btn.disabled=true;
       try{ await api('/api/agents/'+id+'/chats','POST',{ chats }); render(); }
       catch(e){ alert(e.message); btn.disabled=false; } }); };
+  head.querySelector('#joingroup').onclick = ()=>{ const c=head.querySelector('#groupjoin');
+    if (c.dataset.open){ c.innerHTML=''; delete c.dataset.open; return; }
+    c.dataset.open='1';
+    buildGroupJoin(c, { agentId:id, onJoined:()=>setTimeout(()=>{ if(view==='agent:'+id) render(); }, 1500) }); };
+  // Leave a chat: a group is really left by the linked WhatsApp; a one-to-one chat is just no longer answered.
+  head.querySelectorAll('[data-leave]').forEach(b=> b.onclick = async ()=>{
+    const chatId=b.dataset.leave, name=b.dataset.name, group=chatId.endsWith('@g.us');
+    const ok = await confirmDialog(group
+      ? { title:t('Leave this group?'), message:tf("Your linked WhatsApp leaves “{0}”, and no agent answers there any more. To come back you'll need a new invite link.", name), confirmLabel:t('🚪 Leave group'), danger:true }
+      : { title:t('Stop answering this chat?'), message:tf('“{0}” stays in your WhatsApp; this agent just stops answering it.', name), confirmLabel:t('Stop answering'), danger:true });
+    if (!ok) return;
+    b.disabled=true;
+    try{ await api('/api/agents/'+id+'/chats/leave','POST',{ chatId }); render(); }
+    catch(e){ alert(t(e.message)); b.disabled=false; } });
   head.querySelector('#editconns').onclick = ()=>{ const c=head.querySelector('#connedit');
     if (c.dataset.open){ c.innerHTML=''; delete c.dataset.open; return; }
     c.dataset.open='1';
@@ -1025,6 +1078,47 @@ function avatarEl(c, size){ size=size||32; const a=$('<span class="wa-av"></span
 // opts.allowEmpty: let the caller finish with ZERO chats selected — and even with no WhatsApp
 // linked at all. Publishing must never be gated on the WhatsApp link, or a brand-new user's
 // freshly designed agent is unreachable and lost; chats are bindable later from the agent page.
+// Join a WhatsApp group from its invite link: preview it, then the workspace's linked WhatsApp joins (business
+// numbers can't join groups). With opts.agentId that agent answers there straight away; opts.onJoined(chat)
+// runs after a join (not after a join request that still needs an admin's approval).
+async function buildGroupJoin(container, opts){
+  opts=opts||{};
+  const box=$('<div class="card" style="margin-top:8px"></div>'); container.innerHTML=''; container.appendChild(box);
+  box.innerHTML=`<b>${t('👥 Add to a WhatsApp group')}</b>
+    <div class="muted" style="margin:4px 0 8px">${t("Paste the group's invite link (in WhatsApp: group info → Invite via link). Your linked WhatsApp joins the group, and the agent answers there.")}</div>
+    <div class="row"><input class="gj-link" dir="ltr" autocomplete="off" placeholder="https://chat.whatsapp.com/…"/><button class="gj-preview">${t('Preview')}</button></div>
+    <div class="gj-out" style="margin-top:8px"></div>`;
+  const q=(c)=>box.querySelector(c), out=q('.gj-out');
+  let st; try{ st=await api('/api/wa/status'); }catch{ st={status:'disconnected'}; }
+  if (st.status!=='connected'){
+    q('.gj-link').disabled=true; q('.gj-preview').disabled=true;
+    out.innerHTML=`<div class="muted">${t("Groups are joined by your linked WhatsApp account — WhatsApp business numbers can't join groups. Link a WhatsApp account first; a spare number works best, since that's how the agent appears in the group.")}</div>
+      <button class="primary gj-go" style="margin-top:8px">${t('Link a WhatsApp account')}</button>`;
+    q('.gj-go').onclick=()=>{ view='whatsapp'; render(); };
+    return;
+  }
+  const preview=async()=>{ const link=q('.gj-link').value.trim(); if(!link) return;
+    const pb=q('.gj-preview'); pb.disabled=true; out.innerHTML=`<span class="muted">${t('Looking up the group…')}</span>`;
+    try{ const g=await api('/api/wa/groups/preview','POST',{ link });
+      const notes=[ g.member?t('Your linked WhatsApp is already in this group.'):'', g.approvalRequired&&!g.member?t('A group admin has to approve the join request.'):'',
+        g.adminsOnly?t("⚠ Only admins can send messages in this group — the agent can't reply there unless an admin makes it one."):'' ].filter(Boolean);
+      const label = opts.agentId ? (g.member?t('Answer in this group'):t('Join and answer here')) : (g.member?t('Add this group'):t('Join group'));
+      out.innerHTML=`<div class="card" style="margin:0;padding:10px 12px"><b dir="auto">👥 ${esc(g.name)}</b> <span class="muted">· ${esc(tf('{0} members', g.size))}</span>
+        ${notes.map(n=>`<div class="muted" style="margin-top:4px;font-size:13.5px">${esc(n)}</div>`).join('')}
+        <div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="primary gj-join">${esc(label)}</button><span class="gj-msg" style="font-size:13.5px"></span></div></div>`;
+      q('.gj-join').onclick=async()=>{ const jb=q('.gj-join'); jb.disabled=true; q('.gj-msg').innerHTML=`<span class="muted">${t('Joining…')}</span>`;
+        try{ const r=await api('/api/wa/groups/join','POST',{ link, agentId: opts.agentId||undefined });
+          if (r.pending){ out.innerHTML=`<div class="ok">${t('Join request sent. Once a group admin approves it, the group appears in your chats — then choose it under ✏️ Edit chats.')}</div>`; return; }
+          out.innerHTML=`<div class="ok" dir="auto">${esc(opts.agentId?tf('✓ Joined “{0}” — the agent answers there now.', r.chat.name):tf('✓ Joined “{0}”.', r.chat.name))}</div>`;
+          q('.gj-link').value='';
+          if (opts.onJoined) opts.onJoined(r.chat); }
+        catch(e){ q('.gj-msg').innerHTML=`<span class="err">${esc(t(e.message))}</span>`; jb.disabled=false; } };
+    }catch(e){ out.innerHTML=`<div class="err">${esc(t(e.message))}</div>`; }
+    pb.disabled=false; };
+  q('.gj-preview').onclick=preview;
+  q('.gj-link').addEventListener('keydown', e=>{ if(e.key==='Enter') preview(); });
+}
+
 async function buildChatPicker(container, preselected, saveLabel, onSave, opts){
   const allowEmpty = !!(opts && opts.allowEmpty);
   container.innerHTML='';
@@ -1050,7 +1144,11 @@ async function buildChatPicker(container, preselected, saveLabel, onSave, opts){
   const search=$(`<input placeholder="${t('Search chats/contacts…')}"/>`); box.appendChild(search);
   const chips=$('<div style="margin:8px 0"></div>'); box.appendChild(chips);
   const results=$('<div style="max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px;margin-top:6px"></div>'); box.appendChild(results);
-  const save=$('<button class="primary" style="margin-top:10px"></button>'); save.disabled=!allowEmpty; save.textContent=saveLabel; box.appendChild(save);
+  const joinToggle=$(`<button class="ghost" style="margin-top:8px">${t('👥 Not in the group yet? Join with an invite link')}</button>`); box.appendChild(joinToggle);
+  const joinBox=$('<div></div>'); box.appendChild(joinBox);
+  joinToggle.onclick=()=>{ if(joinBox.childElementCount){ joinBox.innerHTML=''; return; }
+    buildGroupJoin(joinBox, { onJoined:(chat)=>{ selected.set(chat.id,{ id:chat.id, name:chat.name, isGroup:true }); renderChips(); doSearch(); } }); };
+  const save=$('<button class="primary" style="margin-top:10px;display:block"></button>'); save.disabled=!allowEmpty; save.textContent=saveLabel; box.appendChild(save);
   function renderChips(){ chips.innerHTML='';
     if(!selected.size){ chips.appendChild($(`<span class="muted">${t('none selected yet')}</span>`)); save.disabled=!allowEmpty; return; }
     [...selected.values()].forEach(c=>{ const pill=$('<span class="pill" style="display:inline-flex;align-items:center;gap:5px;margin:2px"></span>');

@@ -476,6 +476,18 @@ app.get('/api/wa/chats', wrap(async (req, res, auth) => {
   res.json({ chats: state.listPersonalChats(auth.tenantId, String(req.query.q ?? '')) });
 }));
 
+// WhatsApp groups by invite link — joined by the workspace's linked WhatsApp (business numbers can't join
+// groups). Preview first; join optionally puts an agent on the group right away.
+app.post('/api/wa/groups/preview', wrap(async (req, res, auth) => {
+  const { link } = (req.body ?? {}) as { link?: unknown };
+  res.json(await state.previewGroupInvite(auth.tenantId, String(link ?? '')));
+}));
+
+app.post('/api/wa/groups/join', wrap(async (req, res, auth) => {
+  const { link, agentId } = (req.body ?? {}) as { link?: unknown; agentId?: unknown };
+  res.json(await state.joinGroupByInvite(auth.tenantId, String(link ?? ''), typeof agentId === 'string' && agentId ? agentId : undefined));
+}));
+
 app.get('/api/wa/photo', wrap(async (req, res, auth) => {
   const jid = String(req.query.jid ?? '');
   if (!jid) {
@@ -527,6 +539,17 @@ app.post('/api/agents/:id/apply', wrap(async (req, res, auth) => {
   const { suggestions } = (req.body ?? {}) as { suggestions?: TuningSuggestion[] };
   const a = state.applyImprovements(req.params.id, auth.tenantId, Array.isArray(suggestions) ? suggestions : []);
   res.json({ id: a.id, version: a.spec.version });
+}));
+
+// Leave a chat from an agent's page: a group is really left by the linked WhatsApp (no agent answers there
+// any more); a one-to-one chat just stops being answered by this agent.
+app.post('/api/agents/:id/chats/leave', wrap(async (req, res, auth) => {
+  const { chatId } = (req.body ?? {}) as { chatId?: unknown };
+  if (typeof chatId !== 'string' || !chatId) {
+    res.status(400).json({ error: 'missing chatId' });
+    return;
+  }
+  res.json(await state.leaveChat(auth.tenantId, req.params.id, chatId));
 }));
 
 // Edit an existing agent's chat allow-list.

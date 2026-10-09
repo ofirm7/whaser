@@ -20,7 +20,8 @@ import { TwilioLines, twilioPlatformFromEnv, inboundTurn, explainTwilioError } f
 import { TwilioApiError, TWILIO_SANDBOX_NUMBER } from '../../../packages/whatsapp-gateway/src/twilio';
 import type { TwilioInbound, TwilioStatus } from '../../../packages/whatsapp-gateway/src/twilio';
 import type { AgentConnections } from './google';
-import { BaileysChannel } from './baileys';
+import { BaileysChannel, inviteCodeFrom } from './baileys';
+import type { GroupInvitePreview } from './baileys';
 import { TriggerScheduler } from './scheduler';
 import { loadAgents, saveAgents } from './persistence';
 import { readdirSync, readFileSync, writeFileSync, existsSync, statSync, mkdirSync, renameSync } from 'node:fs';
@@ -737,6 +738,68 @@ export class AppState {
     for (const c of chats) this.resolver.bind(this.chatKey(tenantId, c.id), { agentId: agent.id, tenantId });
     this.persist();
     return agent;
+  }
+
+  // --- WhatsApp groups by invite link (through the tenant's linked WhatsApp; business numbers can't join groups) ---
+
+  /** The tenant's linked WhatsApp, or a plain explanation of why groups can't be joined yet. */
+  private groupChannel(tenantId: string): BaileysChannel {
+    const ch = this.channels.get(tenantId);
+    if (!ch || ch.getStatus().status !== 'connected') {
+      throw new Error("Groups are joined by your linked WhatsApp account — WhatsApp business numbers can't join groups. Link a WhatsApp account on the WhatsApp page first.");
+    }
+    return ch;
+  }
+
+  private inviteCode(link: string): string {
+    const code = inviteCodeFrom(link);
+    if (!code) throw new Error('Paste a WhatsApp group invite link — it looks like https://chat.whatsapp.com/… (in WhatsApp: group info → Invite via link).');
+    return code;
+  }
+
+  /** What a group invite link points at, before joining — and whether the linked account is already in it. */
+  async previewGroupInvite(tenantId: string, link: string): Promise<GroupInvitePreview & { member: boolean }> {
+    const ch = this.groupChannel(tenantId);
+    const info = await ch.groupInviteInfo(this.inviteCode(link));
+    return { ...info, member: !!ch.chat(info.id) };
+  }
+
+  /** Join a group from its invite link with the tenant's linked WhatsApp and, when `agentId` is given, have
+   *  that agent answer there. `pending` = an admin has to approve the join first. */
+  async joinGroupByInvite(tenantId: string, link: string, agentId?: string): Promise<{ chat: ChatRef | null; pending: boolean; listenChats: ChatRef[] | null }> {
+    const agent = agentId ? this.getAgent(agentId, tenantId) : undefined;
+    if (agentId && !agent) throw new Error('agent not found');
+    const ch = this.groupChannel(tenantId);
+    const code = this.inviteCode(link);
+    const jid = await ch.joinGroupByInvite(code);
+    if (!jid) return { chat: null, pending: true, listenChats: agent?.listenChats ?? null };
+    const chat: ChatRef = { id: jid, name: ch.chat(jid)?.name ?? jid.split('@')[0] };
+    if (agent && !agent.listenChats.some((c) => c.id === jid)) {
+      agent.listenChats = [...agent.listenChats, chat];
+      this.resolver.bind(this.chatKey(tenantId, jid), { agentId: agent.id, tenantId });
+      this.persist();
+    }
+    return { chat, pending: false, listenChats: agent?.listenChats ?? null };
+  }
+
+  /** Leave a chat from an agent's page. A group is really left by the linked WhatsApp, so no agent in the
+   *  workspace answers there any more; a one-to-one chat just stops being answered by this agent. */
+  async leaveChat(tenantId: string, agentId: string, chatId: string): Promise<{ listenChats: ChatRef[]; leftGroup: boolean }> {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    const isGroup = chatId.endsWith('@g.us');
+    if (isGroup) await this.groupChannel(tenantId).leaveGroup(chatId);
+    const holders = isGroup ? this.listAgents(tenantId) : [agent];
+    for (const a of holders) {
+      if (!a.listenChats.some((c) => c.id === chatId)) continue;
+      a.listenChats = a.listenChats.filter((c) => c.id !== chatId);
+    }
+    // A one-to-one chat another agent still lists keeps being answered — by that agent.
+    const still = isGroup ? undefined : this.listAgents(tenantId).find((a) => a.listenChats.some((c) => c.id === chatId));
+    if (still) this.resolver.bind(this.chatKey(tenantId, chatId), { agentId: still.id, tenantId });
+    else this.resolver.unbind(this.chatKey(tenantId, chatId));
+    this.persist();
+    return { listenChats: agent.listenChats, leftGroup: isGroup };
   }
 
   // --- Scheduled triggers (auto-firing timed actions) ---
