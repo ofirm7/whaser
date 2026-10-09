@@ -126,6 +126,22 @@ scopes (Calendar's are *sensitive*) — fine for test users, but opening sign-in
 Google's app verification (for Gmail/Drive, including a security assessment). That's done once, by the
 operator, for the whole Whaser deployment.
 
+## WhatsApp groups (invite links)
+
+An agent can be put into a WhatsApp group from the group's **invite link** (in WhatsApp: group info →
+Invite via link). On the agent page click **👥 Join a group**, paste the link and **Preview** — Whaser shows
+the group's name and size, and warns when an admin must approve new members or only admins may post (the
+agent couldn't reply there). **Join and answer here** joins the group and the agent starts answering in it.
+The same box is in the chat picker (create wizard and ✏️ Edit chats), where a joined group is ticked.
+
+Groups are joined by the workspace's **QR-linked WhatsApp** account: WhatsApp business numbers (Twilio,
+the Cloud API) can't join a group from an invite link. A spare number works best, since that account is
+how the agent appears in the group.
+
+Each chat under **Listening on** has a leave button: **🚪** on a group makes the linked WhatsApp actually
+leave it (so no agent in the workspace answers there any more; coming back needs a new invite link), and
+**✕** on a one-to-one chat just stops this agent answering it.
+
 ## WhatsApp business numbers (Twilio)
 
 Instead of QR-linking a personal phone, a workspace can give its agents a real WhatsApp **business

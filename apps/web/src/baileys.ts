@@ -35,6 +35,34 @@ export interface ChatEntry {
   ts: number; // last-activity, ms since epoch (0 = unknown)
 }
 
+/** The invite code from a WhatsApp group invite link ("https://chat.whatsapp.com/AbC…", with or without
+ *  the scheme) or a bare code. Null when it isn't one. */
+export function inviteCodeFrom(input: string): string | null {
+  const s = String(input ?? '').trim();
+  const m = s.match(/^(?:https?:\/\/)?chat\.whatsapp\.com\/(?:invite\/)?([A-Za-z0-9]{10,40})\/?(?:[?#].*)?$/i) ?? s.match(/^([A-Za-z0-9]{10,40})$/);
+  return m ? m[1] : null;
+}
+
+/** A readable reason for a failed group-invite query (WhatsApp answers with an error code). */
+function inviteError(e: any, verb: string): Error {
+  const code = Number(e?.output?.statusCode ?? e?.data?.attrs?.code) || 0;
+  if (code === 404 || code === 406 || code === 410) return new Error("This invite link isn't valid any more — it may have been reset by a group admin. Ask for a fresh link.");
+  if (code === 401 || code === 403) return new Error(`WhatsApp won't let this account ${verb} this group (an admin may have removed it before). Ask an admin to add it directly.`);
+  if (code === 419) return new Error('This group is full.');
+  return new Error(`WhatsApp couldn't ${verb} this group right now${code ? ` (error ${code})` : ''}. Try again in a moment.`);
+}
+
+/** What an invite link points at, before joining. */
+export interface GroupInvitePreview {
+  id: string;
+  name: string;
+  size: number;
+  /** An admin has to approve new members. */
+  approvalRequired: boolean;
+  /** Only admins can send messages, so an agent couldn't reply there. */
+  adminsOnly: boolean;
+}
+
 /**
  * The WhatsApp web version to advertise. A pinned Baileys build bakes in the version that was
  * current when it was released, and WhatsApp starts rejecting it within weeks: the pairing socket
@@ -259,6 +287,53 @@ export class BaileysChannel {
     }
   }
 
+  private requireConnected(): any {
+    if (!this.sock || this.status !== 'connected') throw new Error("Your WhatsApp isn't connected right now — open the WhatsApp page and link it, then try again.");
+    return this.sock;
+  }
+
+  /** Look up the group an invite code points at (name, size, join rules) without joining it. */
+  async groupInviteInfo(code: string): Promise<GroupInvitePreview> {
+    const sock = this.requireConnected();
+    let g: any;
+    try {
+      g = await sock.groupGetInviteInfo(code);
+    } catch (e) {
+      throw inviteError(e, 'open');
+    }
+    return { id: String(g.id), name: String(g.subject ?? '').trim() || this.numberOf(String(g.id)), size: Number(g.size) || 0, approvalRequired: !!g.joinApprovalMode, adminsOnly: !!g.announce };
+  }
+
+  /** Join a group with an invite code. Returns the group's jid, or null when an admin has to approve the
+   *  request first (the group then shows up once they do). Joining a group we're already in is fine. */
+  async joinGroupByInvite(code: string): Promise<string | null> {
+    const sock = this.requireConnected();
+    const info = await this.groupInviteInfo(code);
+    let jid: string | undefined;
+    try {
+      jid = await sock.groupAcceptInvite(code);
+    } catch (e: any) {
+      const status = Number(e?.output?.statusCode ?? e?.data?.attrs?.code) || 0;
+      if (status !== 409) throw inviteError(e, 'join'); // 409 = already a participant
+      jid = info.id;
+    }
+    if (!jid) return null; // a membership request is waiting for an admin
+    this.recordChat(jid, info.name, Math.floor(Date.now() / 1000));
+    return jid;
+  }
+
+  /** Leave a group and drop it from the chat list. Already being out of it counts as done. */
+  async leaveGroup(jid: string): Promise<void> {
+    const sock = this.requireConnected();
+    try {
+      await sock.groupLeave(jid);
+    } catch (e: any) {
+      const status = Number(e?.output?.statusCode ?? e?.data?.attrs?.code) || 0;
+      if (![401, 403, 404, 406].includes(status)) throw new Error(`WhatsApp couldn't leave the group right now${status ? ` (error ${status})` : ''}. Try again in a moment.`);
+    }
+    if (this.chats.delete(jid)) this.saveChats();
+  }
+
   private numberOf(jid: string): string {
     return jid.split('@')[0].split(':')[0];
   }
@@ -274,6 +349,11 @@ export class BaileysChannel {
     const ts = Math.max(toMs(tsSeconds), existing?.ts ?? 0); // never lower an existing recency
     this.chats.set(id, { id, name: resolved, isGroup, ts });
     this.saveChats();
+  }
+
+  /** One known chat/contact/group by jid. */
+  chat(jid: string): ChatEntry | undefined {
+    return this.chats.get(jid);
   }
 
   /** Search known chats/contacts (individuals + groups), most-recent first; capped at `limit`.
