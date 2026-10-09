@@ -1,7 +1,7 @@
 import './env';
 import express, { type Request, type Response } from 'express';
-import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync, statSync } from 'node:fs';
 import { createServer as createHttpsServer } from 'node:https';
 import { fileURLToPath } from 'node:url';
 import { authenticate, registerUser, tenantName } from './directory';
@@ -101,6 +101,33 @@ function readCookie(req: Request, name: string): string | null {
 }
 
 const app = express();
+
+// --- The UI and its version ---
+const publicDir = fileURLToPath(new URL('../public', import.meta.url));
+const indexFile = `${publicDir}/index.html`;
+let uiCache: { mtimeMs: number; html: string; version: string } | null = null;
+
+/** The single-page UI as served now, stamped with its version — a fingerprint of index.html as it is on
+ *  disk (re-read only when the file changes). The page keeps the version it was loaded with, and every
+ *  response says which version is live (X-Whaser-Version), so an open page notices a deploy and reloads. */
+function uiPage(): { html: string; version: string } {
+  const mtimeMs = statSync(indexFile).mtimeMs;
+  if (!uiCache || uiCache.mtimeMs !== mtimeMs) {
+    const raw = readFileSync(indexFile, 'utf8');
+    const version = createHash('sha256').update(raw).digest('hex').slice(0, 12);
+    uiCache = { mtimeMs, version, html: raw.replace('<head>', `<head>\n<meta name="whaser-version" content="${version}" />`) };
+  }
+  return uiCache;
+}
+
+app.use((_req, res, next) => {
+  try {
+    res.set('X-Whaser-Version', uiPage().version);
+  } catch {
+    /* no UI file — nothing to report */
+  }
+  next();
+});
 
 // PUBLIC_URL (e.g. https://whaser.example.com:9443) is the app's public https address — the one Google
 // sign-in works at. Browsers that open the app anywhere else (the raw IP, plain http) are sent there.
@@ -760,13 +787,14 @@ app.get('/api/activity', wrap(async (req, res, auth) => {
 }));
 
 // --- Static SPA ---
-const publicDir = fileURLToPath(new URL('../public', import.meta.url));
-// no-cache on the SPA so a redeploy/restart always serves the latest JS (avoids stale clients).
-app.use(express.static(publicDir, { etag: false, setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
-app.get('*', (_req: Request, res: Response) => {
-  res.set('Cache-Control', 'no-cache');
-  res.sendFile(`${publicDir}/index.html`);
-});
+// no-cache on the SPA so a redeploy/restart always serves the latest JS; the page itself is sent stamped
+// with its version (see uiPage), and reloads itself when a newer one goes live.
+const sendUi = (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-cache').type('html').send(uiPage().html);
+};
+app.get(['/', '/index.html'], sendUi);
+app.use(express.static(publicDir, { index: false, etag: false, setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
+app.get('*', sendUi);
 
 const port = Number(process.env.PORT ?? 8080);
 app.listen(port, '0.0.0.0', () => {
