@@ -1,6 +1,8 @@
 import './env';
 import express, { type Request, type Response } from 'express';
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createServer as createHttpsServer } from 'node:https';
 import { fileURLToPath } from 'node:url';
 import { authenticate, registerUser, tenantName } from './directory';
 import { AppState } from './store';
@@ -99,6 +101,20 @@ function readCookie(req: Request, name: string): string | null {
 }
 
 const app = express();
+
+// PUBLIC_URL (e.g. https://whaser.example.com:9443) is the app's public https address — the one Google
+// sign-in works at. Browsers that open the app anywhere else (the raw IP, plain http) are sent there.
+// Page loads only: API calls and webhooks (Twilio, Meta) keep working wherever they point, and loopback
+// stays put for local tools and SSH tunnels.
+const publicUrl = process.env.PUBLIC_URL?.trim().replace(/\/+$/, '');
+if (publicUrl) {
+  app.use((req, res, next) => {
+    const host = (req.header('x-forwarded-host') ?? req.get('host') ?? '').split(':')[0];
+    const local = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    if (req.method !== 'GET' || req.path.startsWith('/api/') || req.path === '/healthz' || local || requestBase(req) === publicUrl) return next();
+    res.redirect(302, publicUrl + req.originalUrl);
+  });
+}
 
 // Real WhatsApp Cloud API webhook — mounted FIRST so its raw-body parser (needed for the
 // X-Hub-Signature-256 HMAC) runs before the global JSON parser. Only when configured.
@@ -732,6 +748,7 @@ app.get('*', (_req: Request, res: Response) => {
 const port = Number(process.env.PORT ?? 8080);
 app.listen(port, '0.0.0.0', () => {
   console.log(`Whaser demo GUI on http://0.0.0.0:${port}  (login: alice/password, bob/password, carol/password)`);
+  if (publicUrl) console.log(`Public address: ${publicUrl} (page loads elsewhere are sent there)`);
   const pinned = process.env.GOOGLE_REDIRECT_URI;
   if (!state.google.isConfigured()) console.log('Sign in with Google: off — set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (see apps/web/README.md) to turn it on for every workspace');
   else console.log(`Sign in with Google: on (redirect URI ${pinned ?? '<the URL Whaser is opened at>/api/google/callback'}${pinned && redirectUriProblem(pinned) ? ' — ⚠ Google rejects this address: use https on a domain, or localhost' : ''})`);
@@ -740,3 +757,26 @@ app.listen(port, '0.0.0.0', () => {
     console.log(`[twilio] in Twilio, set "When a message comes in" (POST) for ${state.twilio.platform.numbers.join(', ')} to ${base}${TWILIO_WEBHOOK_PATH}`);
   }
 });
+
+// HTTPS, when HTTPS_PORT + TLS_CERT_FILE + TLS_KEY_FILE are set (e.g. a Let's Encrypt certificate). The
+// certificate renews on disk, so it's re-read every 12 hours without a restart. A missing or unreadable
+// certificate is logged and the plain-http listener above keeps serving.
+const httpsPort = Number(process.env.HTTPS_PORT ?? 0);
+const { TLS_CERT_FILE: certFile, TLS_KEY_FILE: keyFile } = process.env;
+if (httpsPort && certFile && keyFile) {
+  const loadTls = () => ({ cert: readFileSync(certFile), key: readFileSync(keyFile) });
+  try {
+    const server = createHttpsServer(loadTls(), app);
+    server.on('error', (e) => console.error(`[https] port ${httpsPort}:`, e.message));
+    server.listen(httpsPort, '0.0.0.0', () => console.log(`Whaser over https on port ${httpsPort}`));
+    setInterval(() => {
+      try {
+        server.setSecureContext(loadTls());
+      } catch (e) {
+        console.error('[https] couldn\'t reload the certificate:', e instanceof Error ? e.message : e);
+      }
+    }, 12 * 3600_000).unref();
+  } catch (e) {
+    console.error(`[https] not started — couldn't read the certificate (${e instanceof Error ? e.message : e})`);
+  }
+}
