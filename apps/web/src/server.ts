@@ -499,6 +499,12 @@ app.get('/api/wa/status', wrap(async (_req, res, auth) => {
   res.json(state.personalLinkStatus(auth.tenantId));
 }));
 
+// Unlink the workspace's WhatsApp (to link a different number — e.g. one just for its agents).
+app.post('/api/wa/unlink', wrap(async (_req, res, auth) => {
+  await state.unlinkPersonal(auth.tenantId);
+  res.json(state.personalLinkStatus(auth.tenantId));
+}));
+
 app.get('/api/wa/chats', wrap(async (req, res, auth) => {
   res.json({ chats: state.listPersonalChats(auth.tenantId, String(req.query.q ?? '')) });
 }));

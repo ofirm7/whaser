@@ -1,7 +1,7 @@
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, downloadMediaMessage, getBinaryNodeChild, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import { fileURLToPath } from 'node:url';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export type LinkStatus = 'disconnected' | 'connecting' | 'qr' | 'connected';
@@ -112,6 +112,8 @@ export class BaileysChannel {
   // knows the conversation that already happened, not just messages received after it was linked.
   private readonly threadHistory = new Map<string, { fromMe: boolean; text: string; ts: number }[]>();
   private readonly historyFile: string;
+  /** The number of the account these caches belong to — so linking a different number starts clean. */
+  private readonly accountFile: string;
   private historySaveTimer: any = null;
   private static readonly HISTORY_PER_CHAT = 50;
 
@@ -124,6 +126,7 @@ export class BaileysChannel {
     this.chatsFile = fileURLToPath(new URL('../.data/wa-chats-' + safe + '.json', import.meta.url));
     this.styleFile = fileURLToPath(new URL('../.data/wa-owner-style-' + safe + '.json', import.meta.url));
     this.historyFile = fileURLToPath(new URL('../.data/wa-history-' + safe + '.json', import.meta.url));
+    this.accountFile = fileURLToPath(new URL('../.data/wa-account-' + safe + '.json', import.meta.url));
     try {
       if (existsSync(this.chatsFile)) {
         const arr = JSON.parse(readFileSync(this.chatsFile, 'utf8'));
@@ -415,6 +418,7 @@ export class BaileysChannel {
     this.starting = true;
     this.status = 'connecting';
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+    this.noteAccount(state.creds?.me?.id ? this.numberOf(String(state.creds.me.id)) : null);
     const version = await resolveWaVersion();
     const sock = makeWASocket({
       auth: state,
@@ -471,9 +475,7 @@ export class BaileysChannel {
         const code = u.lastDisconnect?.error?.output?.statusCode;
         this.sock = null;
         if (code === DisconnectReason.loggedOut) {
-          this.status = 'disconnected';
-          this.me = null;
-          this.qrDataUrl = null;
+          this.onLoggedOut();
         } else {
           // Anything else (405 on an outdated client, a network blip, a server-side close) used to
           // re-enter start() immediately — a silent hot loop that reconnected every few seconds
@@ -578,11 +580,55 @@ export class BaileysChannel {
     });
   }
 
-  async logout(): Promise<void> {
-    try { await this.sock?.logout?.(); } catch { /* ignore */ }
+  /** Unlink this WhatsApp account from Whaser — e.g. to link a separate number just for the agents: log
+   *  the linked device out, drop the stored session, and forget the account's chat list, thread history
+   *  and writing-style samples. The next link starts from a fresh QR code. */
+  async unlink(): Promise<void> {
+    const sock = this.sock;
+    try { await sock?.logout?.(); } catch { /* not connected — the session is dropped below anyway */ }
+    try { sock?.end?.(undefined); } catch { /* already closed */ }
     this.sock = null;
+    this.retries = 0;
+    this.onLoggedOut();
+    this.forgetAccountData();
+    try { rmSync(this.accountFile, { force: true }); } catch { /* ignore */ }
+  }
+
+  /** WhatsApp ended this linked device (unlinked here, or from the phone's Linked devices). Its session is
+   *  dead, so delete it — otherwise every later start() would reuse it, fail again, and never show a QR. */
+  private onLoggedOut(): void {
     this.status = 'disconnected';
-    this.qrDataUrl = null;
     this.me = null;
+    this.qrDataUrl = null;
+    try { rmSync(this.authDir, { recursive: true, force: true }); } catch (e) { console.error('[baileys] could not delete the old session', this.slug, e); }
+  }
+
+  /** Remember which number the caches belong to; when a different number has been linked since, forget the
+   *  previous account's chats, history and style samples (they must not show up for, or train, another number). */
+  private noteAccount(me: string | null): void {
+    if (!me) return;
+    let prev: string | null = null;
+    try { prev = existsSync(this.accountFile) ? String(JSON.parse(readFileSync(this.accountFile, 'utf8'))?.me ?? '') || null : null; } catch { /* unreadable — treat as unknown */ }
+    if (prev && prev !== me) {
+      console.log(`[baileys] ${this.slug}: a different WhatsApp number was linked — clearing the previous account's chats`);
+      this.forgetAccountData();
+    }
+    if (prev !== me) {
+      try {
+        const dir = dirname(this.accountFile);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(this.accountFile, JSON.stringify({ me }));
+      } catch { /* ignore */ }
+    }
+  }
+
+  private forgetAccountData(): void {
+    this.chats.clear();
+    this.threadHistory.clear();
+    this.ownerStyle.length = 0;
+    this.photoCache.clear();
+    for (const f of [this.chatsFile, this.historyFile, this.styleFile]) {
+      try { rmSync(f, { force: true }); } catch { /* ignore */ }
+    }
   }
 }

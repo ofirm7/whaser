@@ -615,6 +615,12 @@ export class AppState {
     } catch (e) { console.error('[baileys] legacy migration failed', e); }
   }
 
+  /** Unlink the tenant's WhatsApp account, so a different number (e.g. one just for its agents) can be
+   *  linked. Agents keep their chats and groups: once the new number is in the same groups, they answer. */
+  async unlinkPersonal(tenantId: string): Promise<void> {
+    await this.channels.get(tenantId)?.unlink();
+  }
+
   async startPersonalLink(tenantId: string): Promise<void> {
     await this.channelFor(tenantId).start();
   }

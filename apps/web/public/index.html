@@ -331,6 +331,14 @@ const I18N = { he: {
     "Remove": "הסרה",
     "Saving…": "שומר…",
     "Close": "סגירה",
+    "Agents reply from this number in the chats and groups they listen on — that's who people there see.": "הסוכנים עונים מהמספר הזה בצ׳אטים ובקבוצות שהם מאזינים להם — זה מה שאנשים שם רואים.",
+    "Want your agents to have their own number? Link a separate WhatsApp account for them (a spare SIM or a second phone with WhatsApp or WhatsApp Business) instead of your personal one.": "רוצים שלסוכנים יהיה מספר משלהם? קשרו עבורם חשבון WhatsApp נפרד (SIM נוסף או טלפון שני עם WhatsApp או WhatsApp Business) במקום החשבון האישי שלכם.",
+    "Unlink / use a different number": "ניתוק / שימוש במספר אחר",
+    "Unlink this WhatsApp?": "לנתק את ה-WhatsApp הזה?",
+    "Agents stop replying from {0}. Its chat list and writing samples are cleared from Whaser. Your agents keep their chats and groups — once the new number is in the same groups, they answer there again.": "הסוכנים יפסיקו לענות מ-{0}. רשימת הצ׳אטים ודוגמאות הכתיבה שלו יימחקו מ-Whaser. הסוכנים שומרים את הצ׳אטים והקבוצות שלהם — ברגע שהמספר החדש יהיה באותן קבוצות, הם יענו שם שוב.",
+    "Unlink": "ניתוק",
+    "In these chats the agent replies from your linked WhatsApp, {0}.": "בצ׳אטים האלה הסוכן עונה מה-WhatsApp המקושר שלכם, {0}.",
+    "It joins as your linked WhatsApp, {0} — that's who people in the group see.": "הוא מצטרף בתור ה-WhatsApp המקושר שלכם, {0} — זה מה שאנשים בקבוצה רואים.",
     "Whaser was updated.": "Whaser עודכן.",
     "Reload": "טעינה מחדש",
     "👥 Join a group": "👥 הצטרפות לקבוצה",
@@ -731,7 +739,7 @@ async function AgentDetailView(wrap, id){
          <div style="margin-top:4px">${a.spec.sub_agents.map(s=>`<span class="pill">🤖 ${esc(s.name)}${s.tool_names.length?(' ['+s.tool_names.map(esc).join(', ')+']'):''}</span>`).join('')}</div></div>`
       : `<div style="margin-top:10px muted"><b>${t('Workflow:')}</b> <span class="muted">${t('single agent')}</span></div>`}
     ${(a.spec.skills&&a.spec.skills.length)?`<div style="margin-top:10px"><b>${t('Skills:')}</b> ${a.spec.skills.map(s=>`<span class="pill" title="${esc(s.description)}">🧩 ${esc(s.name)}</span>`).join('')}</div>`:''}
-    <div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?(`<b>${t('Listening on:')}</b> `+a.listenChats.map(c=>{ const g=String(c.id).endsWith('@g.us');
+    <div style="margin-top:10px" id="chatline">${(a.listenChats&&a.listenChats.length)?(`<b>${t('Listening on:')}</b> `+a.listenChats.map(c=>{ const g=String(c.id).endsWith('@g.us');
       return `<span class="pill">${g?'👥':'💬'} <span dir="auto">${esc(c.name)}</span><button class="chipx" data-leave="${esc(c.id)}" data-name="${esc(c.name)}" title="${esc(g?t('Leave this group'):t('Stop answering this chat'))}" aria-label="${esc(g?t('Leave this group'):t('Stop answering this chat'))}">${g?'🚪':'✕'}</button></span>`; }).join('')):`<span class="muted"><b>${t('Listening on:')}</b> ${t('no chats selected (chosen during creation)')}</span>`}</div>
     ${a.twilio&&a.twilio.answersHere?`<div style="margin-top:6px"><b>${t('WhatsApp business number:')}</b> ${esc(tf('answers everyone who messages {0}', ltr(a.twilio.number)))}</div>`:''}
     <div style="margin-top:6px" id="connline">${Object.keys(a.connections||{}).length?(`<b>${t('Google:')}</b> `+connectionPills(a.connections)):`<span class="muted"><b>${t('Google:')}</b> ${t('no Google connections')}</span>`}</div>
@@ -762,6 +770,7 @@ async function AgentDetailView(wrap, id){
     buildChatPicker(c, a.listenChats||[], t('Save chats'), async (chats, btn)=>{ btn.disabled=true;
       try{ await api('/api/agents/'+id+'/chats','POST',{ chats }); render(); }
       catch(e){ alert(e.message); btn.disabled=false; } }); };
+  if ((a.listenChats||[]).length) api('/api/wa/status').then(ws=>{ if (ws.me) head.querySelector('#chatline').appendChild($(`<div class="muted" style="font-size:13px;margin-top:2px">${esc(tf('In these chats the agent replies from your linked WhatsApp, {0}.', ltr('+'+ws.me)))}</div>`)); }).catch(()=>{});
   head.querySelector('#joingroup').onclick = ()=>{ const c=head.querySelector('#groupjoin');
     if (c.dataset.open){ c.innerHTML=''; delete c.dataset.open; return; }
     c.dataset.open='1';
@@ -1046,7 +1055,15 @@ async function WhatsAppView(wrap){
     if (s.status === 'connected'){
       card.innerHTML = `<div class="ok" style="font-size:16px">${s.me?tf('✓ Linked as +{0}', esc(s.me)):t('✓ Linked')}</div>
         <div class="muted" style="margin-top:8px">${t('Each agent replies only in the chats picked during its creation. Use <b>+ Create agent</b> and select its chats.')}</div>
-        <div class="muted" style="margin-top:6px">${tf('Then message <b>+{0}</b> from a selected chat — the agent (WAT + Claude) replies; unselected chats are ignored.', esc(s.me||t('your number')))}</div>`;
+        <div class="muted" style="margin-top:6px">${tf('Then message <b>+{0}</b> from a selected chat — the agent (WAT + Claude) replies; unselected chats are ignored.', esc(s.me||t('your number')))}</div>
+        <div style="margin-top:10px">${t("Agents reply from this number in the chats and groups they listen on — that's who people there see.")}</div>
+        <div class="muted" style="margin-top:6px">${t('Want your agents to have their own number? Link a separate WhatsApp account for them (a spare SIM or a second phone with WhatsApp or WhatsApp Business) instead of your personal one.')}</div>
+        <button class="ghost wa-unlink" style="margin-top:10px">${t('Unlink / use a different number')}</button>`;
+      card.querySelector('.wa-unlink').onclick = async ()=>{
+        const ok = await confirmDialog({ title:t('Unlink this WhatsApp?'), message:tf('Agents stop replying from {0}. Its chat list and writing samples are cleared from Whaser. Your agents keep their chats and groups — once the new number is in the same groups, they answer there again.', ltr('+'+(s.me||''))), confirmLabel:t('Unlink'), danger:true });
+        if (!ok) return;
+        try{ await api('/api/wa/unlink','POST'); }catch(e){ alert(t(e.message)); return; }
+        await refresh(); if (!waPollTimer) waPollTimer = setInterval(refresh, 2500); };
       if (waPollTimer){ clearInterval(waPollTimer); waPollTimer=null; }
     } else if (s.status === 'qr' && s.qrDataUrl){
       card.innerHTML = `<div>${t('On your phone: <b>WhatsApp → Settings → Linked devices → Link a device</b>, then scan this code:')}</div>
@@ -1126,6 +1143,7 @@ async function buildGroupJoin(container, opts){
     q('.gj-go').onclick=()=>{ view='whatsapp'; render(); };
     return;
   }
+  if (st.me) out.insertAdjacentHTML('beforebegin', `<div class="muted" style="margin-top:6px;font-size:13px">${esc(tf("It joins as your linked WhatsApp, {0} — that's who people in the group see.", ltr('+'+st.me)))}</div>`);
   const preview=async()=>{ const link=q('.gj-link').value.trim(); if(!link) return;
     const pb=q('.gj-preview'); pb.disabled=true; out.innerHTML=`<span class="muted">${t('Looking up the group…')}</span>`;
     try{ const g=await api('/api/wa/groups/preview','POST',{ link });
