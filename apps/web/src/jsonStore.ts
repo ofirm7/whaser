@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 /**
  * A tenantId → record JSON file, hardened like persistence.ts: every save rewrites the WHOLE file from
  * memory, so a store that silently loaded as {} would let the next save wipe every workspace's saved
- * credentials (Google clients and tokens, Twilio accounts). A damaged file is therefore preserved
+ * credentials (Google tokens, WhatsApp number assignments). A damaged file is therefore preserved
  * (copied beside it) and the store goes read-only — saves throw — instead of being papered over; the
  * rest of the app keeps running. Odd records are dropped but the original file is kept. Saves are
  * atomic (tmp + rename), owner-only (secrets, refresh tokens), and a failed save throws without

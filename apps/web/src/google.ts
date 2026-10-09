@@ -6,16 +6,15 @@ import { JsonStore, without } from './jsonStore';
 /**
  * Google connections — Gmail, Google Calendar and Google Drive for agents.
  *
- * A workspace (tenant) enters its own Google OAuth client ("Web application" client ID + secret) in
- * Settings, then links its Google account ONCE through OAuth 2.0 (authorization code + PKCE, offline
- * access → refresh token; client + tokens kept owner-only in the gitignored .data dir). Each agent then
- * opts into any of the three services at "read" or "read_write" access, and the runtime offers it
- * matching built-in tools (gmail_search, calendar_create_event, drive_read_file, …) that run here
- * against Google's REST APIs. A thin direct client over fetch (no googleapis SDK), like the WhatsApp
- * Graph client.
- *
- * GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET in the env are an optional server-wide default for workspaces
- * that haven't saved their own; GOOGLE_REDIRECT_URI overrides the callback URL derived from the request.
+ * "Sign in with Google": a workspace (tenant) links its Google account ONCE by clicking a button and
+ * approving on Google's own consent screen — OAuth 2.0 authorization code + PKCE, offline access →
+ * refresh token, tokens kept owner-only in the gitignored .data dir. Nobody in a workspace ever creates
+ * or pastes anything: the OAuth client belongs to the Whaser deployment, set once by the operator in the
+ * env (GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET; GOOGLE_REDIRECT_URI overrides the callback URL derived
+ * from the request). Each agent then opts into any of the three services at "read" or "read_write"
+ * access, and the runtime offers it matching built-in tools (gmail_search, calendar_create_event,
+ * drive_read_file, …) that run here against Google's REST APIs. A thin direct client over fetch (no
+ * googleapis SDK), like the WhatsApp Graph client.
  */
 
 export const GOOGLE_SERVICES = ['gmail', 'calendar', 'drive'] as const;
@@ -81,34 +80,19 @@ function grantCovers(granted: AgentConnections, service: GoogleService, need: Go
   return need === 'read' ? !!g : g === 'read_write';
 }
 
-// --- Per-workspace OAuth client + account store + OAuth flow ---
+// --- The deployment's OAuth client + per-workspace account store + OAuth flow ---
 
-/** A Google Cloud "Web application" OAuth client. */
+/** The Whaser deployment's Google Cloud "Web application" OAuth client (operator env, shared by every workspace). */
 interface OAuthClient {
   clientId: string;
   clientSecret: string;
 }
 
-interface StoredClient extends OAuthClient {
-  updatedBy: string;
-  updatedAt: number;
+function platformClient(): OAuthClient | null {
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+  return clientId && clientSecret ? { clientId, clientSecret } : null;
 }
-
-/** What Settings shows about the workspace's OAuth client — never the secret itself. */
-export interface GoogleClientSettings {
-  /** Where the active client comes from: this workspace's Settings, the server default, or nowhere yet. */
-  source: 'workspace' | 'server' | 'none';
-  /** The workspace's own client id ('' when it hasn't saved one). */
-  clientId: string;
-  /** Last 4 characters of the saved secret, so the owner can recognise it. */
-  secretHint: string | null;
-  updatedBy: string | null;
-  updatedAt: number | null;
-  /** Set when a saved Google file couldn't be trusted at startup, so nothing can be saved until it's fixed. */
-  problem: string | null;
-}
-
-const CLIENT_ID_RE = /^[\w.-]+\.apps\.googleusercontent\.com$/;
 
 interface GoogleGrant {
   /** The OAuth client that issued these tokens (they only work with it). Absent on early grants. */
@@ -145,7 +129,7 @@ interface TokenResponse {
 }
 
 export interface GoogleStatus {
-  /** An OAuth client is available to this workspace (its own from Settings, or the server default). */
+  /** Sign in with Google is turned on for this Whaser server (the operator set its OAuth client). */
   configured: boolean;
   connected: boolean;
   email: string | null;
@@ -156,6 +140,9 @@ export interface GoogleStatus {
 
 /** The owner hasn't linked Google (or the grant was revoked) — tools turn this into guidance. */
 export class GoogleNotConnectedError extends Error {}
+
+/** Shown when the operator hasn't turned Sign in with Google on — nothing a workspace can fix itself. */
+export const GOOGLE_UNAVAILABLE = "Sign in with Google isn't turned on for this Whaser server yet. Please ask your Whaser administrator.";
 
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -188,25 +175,6 @@ export function redirectUriProblem(uri: string): 'ip' | 'http' | null {
   return u.protocol === 'https:' ? null : 'http';
 }
 
-/** Ask Google whether a client id + secret pair is genuine: exchanging a dummy code fails with
- *  invalid_client when the credentials are wrong, and with a different error (invalid_grant) when
- *  they're right. 'unknown' when Google couldn't be reached. */
-async function verifyClient(c: OAuthClient, redirectUri: string): Promise<'ok' | 'invalid' | 'unknown'> {
-  try {
-    const res = await fetch(TOKEN_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: c.clientId, client_secret: c.clientSecret, grant_type: 'authorization_code', code: 'whaser-credential-check', redirect_uri: redirectUri }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    const d = (await res.json().catch(() => ({}))) as TokenResponse;
-    if (d.error === 'invalid_client') return 'invalid';
-    return d.error || res.ok ? 'ok' : 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
-
 function sameSecret(a: string, b: string): boolean {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
@@ -214,88 +182,36 @@ function sameSecret(a: string, b: string): boolean {
 }
 
 const isObj = (r: unknown): r is Record<string, unknown> => !!r && typeof r === 'object' && !Array.isArray(r);
-const isStoredClient = (r: unknown): boolean => isObj(r) && typeof r.clientId === 'string' && typeof r.clientSecret === 'string';
 const isGrant = (r: unknown): boolean => isObj(r) && typeof r.accessToken === 'string' && typeof r.refreshToken === 'string' && Array.isArray(r.scopes);
 
 export class GoogleAccounts {
   private readonly grants: JsonStore<GoogleGrant>;
-  private readonly clients: JsonStore<StoredClient>;
   private readonly pending = new Map<string, PendingAuth>();
   /** One in-flight token refresh per workspace, shared by concurrent tool calls. */
   private readonly refreshing = new Map<string, Promise<string>>();
 
-  constructor(
-    file = fileURLToPath(new URL('../.data/google-accounts.json', import.meta.url)),
-    clientsFile = fileURLToPath(new URL('../.data/google-clients.json', import.meta.url)),
-  ) {
+  constructor(file = fileURLToPath(new URL('../.data/google-accounts.json', import.meta.url))) {
     this.grants = new JsonStore<GoogleGrant>(file, 'Google account links', isGrant, 'google');
-    this.clients = new JsonStore<StoredClient>(clientsFile, 'Google OAuth client settings', isStoredClient, 'google');
   }
 
-  /** The OAuth client this workspace signs in with: its own from Settings, else the server default. */
-  private clientFor(tenantId: string): OAuthClient | null {
-    const own = this.clients.data[tenantId];
-    if (own) return own;
-    const { GOOGLE_CLIENT_ID: clientId, GOOGLE_CLIENT_SECRET: clientSecret } = process.env;
-    return clientId && clientSecret ? { clientId, clientSecret } : null;
+  /** Sign in with Google is turned on for this server (the operator set the OAuth client in the env). */
+  isConfigured(): boolean {
+    return !!platformClient();
   }
 
-  isConfigured(tenantId: string): boolean {
-    return !!this.clientFor(tenantId);
-  }
-
-  /** The workspace's grant, if it was issued to the OAuth client the workspace uses now (tokens from
-   *  another client can't be refreshed with this one). */
+  /** The workspace's grant, if it was issued to the OAuth client the server uses now (tokens from
+   *  another client can't be refreshed with this one — e.g. after the operator switched clients). */
   private liveGrant(tenantId: string): GoogleGrant | undefined {
     const g = this.grants.data[tenantId];
-    const client = this.clientFor(tenantId);
+    const client = platformClient();
     if (!g || !client) return undefined;
     return !g.clientId || g.clientId === client.clientId ? g : undefined;
-  }
-
-  clientSettings(tenantId: string): GoogleClientSettings {
-    const own = this.clients.data[tenantId];
-    return {
-      source: own ? 'workspace' : this.clientFor(tenantId) ? 'server' : 'none',
-      clientId: own?.clientId ?? '',
-      secretHint: own ? own.clientSecret.slice(-4) : null,
-      updatedBy: own?.updatedBy ?? null,
-      updatedAt: own?.updatedAt ?? null,
-      problem: this.clients.locked || this.grants.locked ? "Whaser couldn't read its saved Google settings, so changes can't be saved right now. An admin needs to check the server log." : null,
-    };
-  }
-
-  /** Save the workspace's own OAuth client (Settings). Google confirms the id + secret pair first; an
-   *  empty secret keeps the saved one. Switching to a different client unlinks the Google account,
-   *  whose tokens belong to the old client. Returns whether Google confirmed it (false = unreachable). */
-  async setClient(tenantId: string, username: string, input: { clientId?: unknown; clientSecret?: unknown }, redirectUri: string): Promise<{ verified: boolean }> {
-    const clientId = String(input.clientId ?? '').trim();
-    if (!CLIENT_ID_RE.test(clientId)) throw new Error("That doesn't look like a Google OAuth client ID — it ends with .apps.googleusercontent.com.");
-    const prev = this.clients.data[tenantId];
-    const clientSecret = String(input.clientSecret ?? '').trim() || (prev?.clientId === clientId ? prev.clientSecret : '');
-    if (!clientSecret) throw new Error('Enter the client secret.');
-    if (/\s/.test(clientSecret) || clientSecret.length > 200) throw new Error("That doesn't look like a Google client secret.");
-    const check = await verifyClient({ clientId, clientSecret }, redirectUri);
-    if (check === 'invalid') throw new Error('Google rejected this client ID and secret. Check that both were copied from the same OAuth client.');
-    const before = this.clientFor(tenantId)?.clientId;
-    this.clients.save({ ...this.clients.data, [tenantId]: { clientId, clientSecret, updatedBy: username, updatedAt: Date.now() } });
-    if (before !== clientId) await this.disconnect(tenantId);
-    return { verified: check === 'ok' };
-  }
-
-  /** Forget the workspace's own OAuth client (falls back to the server default, if any). The Google
-   *  account is unlinked when that changes the client its tokens belong to. */
-  async removeClient(tenantId: string): Promise<void> {
-    const before = this.clientFor(tenantId)?.clientId;
-    if (!this.clients.data[tenantId]) return;
-    this.clients.save(without(this.clients.data, tenantId));
-    if (this.clientFor(tenantId)?.clientId !== before) await this.disconnect(tenantId);
   }
 
   status(tenantId: string): GoogleStatus {
     const g = this.liveGrant(tenantId);
     return {
-      configured: this.isConfigured(tenantId),
+      configured: this.isConfigured(),
       connected: !!g,
       email: g?.email ?? null,
       connectedBy: g?.connectedBy ?? null,
@@ -303,14 +219,14 @@ export class GoogleAccounts {
     };
   }
 
-  /** Start linking: returns Google's consent URL (and the nonce the caller sets as a cookie). Requests
-   *  the scopes for `services`; include_granted_scopes keeps anything granted earlier. */
+  /** Start "Sign in with Google": returns Google's consent URL (and the nonce the caller sets as a cookie).
+   *  Requests the scopes for `services` — none just signs in, and agents ask for more later (incremental
+   *  authorization); include_granted_scopes keeps anything granted earlier. */
   beginAuth(args: { tenantId: string; username: string; services: unknown; redirectUri: string }): { url: string; nonce: string } {
-    const client = this.clientFor(args.tenantId);
-    if (!client) throw new Error('Add your Google OAuth client in Settings first.');
+    const client = platformClient();
+    if (!client) throw new Error(GOOGLE_UNAVAILABLE);
     const want = normalizeConnections(args.services);
     const scopes = Object.entries(want).map(([s, a]) => REQUEST_SCOPE[s as GoogleService][a as GoogleAccess]);
-    if (!scopes.length) throw new Error('Pick at least one Google service to connect.');
     const now = Date.now();
     for (const [k, p] of this.pending) if (p.expiresAt < now) this.pending.delete(k);
     if (this.pending.size >= MAX_PENDING) this.pending.delete(this.pending.keys().next().value as string); // oldest first
@@ -342,8 +258,8 @@ export class GoogleAccounts {
       throw new Error('This Google sign-in was started in a different browser. Start again from Whaser in this browser.');
     }
     if (!args.code) throw new Error('Google did not return an authorization code.');
-    const client = this.clientFor(p.tenantId);
-    if (!client || client.clientId !== p.clientId) throw new Error('The Google settings changed during sign-in. Start again from Whaser.');
+    const client = platformClient();
+    if (!client || client.clientId !== p.clientId) throw new Error('Google sign-in was changed on the server while you were signing in. Please start again from Whaser.');
     const tok = await this.tokenRequest(client, { grant_type: 'authorization_code', code: args.code, redirect_uri: p.redirectUri, code_verifier: p.verifier });
     const prev = this.liveGrant(p.tenantId);
     const refreshToken = tok.refresh_token || prev?.refreshToken;
@@ -413,7 +329,7 @@ export class GoogleAccounts {
   }
 
   private async refresh(tenantId: string, g: GoogleGrant): Promise<string> {
-    const client = this.clientFor(tenantId);
+    const client = platformClient();
     if (!client) throw new GoogleNotConnectedError('no client');
     let tok: TokenResponse;
     try {
@@ -466,7 +382,7 @@ async function googleErrorText(res: Response): Promise<string> {
     /* non-JSON error body */
   }
   if (res.status === 403 && /insufficient authentication scopes|scope_insufficient/i.test(msg)) {
-    return "Google refused: this connection doesn't include that permission. The owner can reconnect Google with the right access on the agent's page in Whaser.";
+    return "Google refused: this connection doesn't include that permission. The owner can sign in with Google again on the agent's page in Whaser to allow it.";
   }
   return `Google API error ${res.status}${msg ? `: ${msg}` : ''}`;
 }
@@ -647,11 +563,11 @@ export async function runGoogleTool(
   const access = ctx.connections?.[d.service];
   if (!access) return `This agent isn't connected to ${label}. The owner can add it on the agent's page in Whaser (🔗 Google connections).`;
   if (d.write && access !== 'read_write') return `This agent has read-only access to ${label}, so it can't make changes there.`;
-  if (!accounts.isConfigured(ctx.tenantId)) return `Google isn't set up for this workspace yet, so ${label} can't be reached. The owner can add it under Settings in Whaser.`;
+  if (!accounts.isConfigured()) return `Sign in with Google isn't turned on for this Whaser server yet, so ${label} can't be reached. The Whaser administrator needs to turn it on.`;
   const status = accounts.status(ctx.tenantId);
-  if (!status.connected) return `The owner's Google account isn't connected. The owner can connect it on the agent's page in Whaser (🔗 Google connections).`;
+  if (!status.connected) return `The owner hasn't signed in with Google yet. The owner can do it on the agent's page in Whaser (🔗 Google connections).`;
   if (!grantCovers(status.granted, d.service, d.write ? 'read_write' : 'read')) {
-    return `The owner's Google connection doesn't include ${d.write ? 'write' : 'read'} access to ${label} yet. The owner can reconnect Google on the agent's page in Whaser to grant it.`;
+    return `The owner's Google connection doesn't include ${d.write ? 'write' : 'read'} access to ${label} yet. The owner can sign in with Google again on the agent's page in Whaser to allow it.`;
   }
   if (ctx.testMode && d.write) return `(Test) Would run ${name} with ${JSON.stringify(input)} — not actually done during a test.`;
   const c: ToolContext = { accounts, tenantId: ctx.tenantId };
@@ -659,7 +575,7 @@ export async function runGoogleTool(
     return await HANDLERS[name](c, input);
   } catch (e) {
     if (e instanceof GoogleNotConnectedError) {
-      return "The owner's Google access was revoked or has expired. The owner can reconnect Google on the agent's page in Whaser.";
+      return "The owner's Google access was revoked or has expired. The owner can sign in with Google again on the agent's page in Whaser.";
     }
     return `${name} failed: ${e instanceof Error ? e.message : String(e)}`;
   }

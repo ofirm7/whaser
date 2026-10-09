@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { authenticate, registerUser, tenantName } from './directory';
 import { AppState } from './store';
-import { callbackPage, redirectUriProblem, suggestConnections } from './google';
+import { callbackPage, redirectUriProblem, suggestConnections, normalizeConnections, type AgentConnections } from './google';
 import type { TuningSuggestion } from '../../../packages/agent-builder/src/index';
 import { createWebhookRouter } from '../../../packages/whatsapp-gateway/src/express';
 import { parseTwilioInbound, parseTwilioStatus, verifyTwilioSignature } from '../../../packages/whatsapp-gateway/src/twilio';
@@ -76,8 +76,8 @@ function requestBase(req: Request): string {
   return `${proto}://${host}`;
 }
 
-/** Where Google sends the OAuth pop-up back to — must be registered on the Google OAuth client.
- *  GOOGLE_REDIRECT_URI pins it; otherwise it follows the URL the app is being used at. */
+/** Where Google sends the sign-in pop-up back to — must be registered on the deployment's Google OAuth
+ *  client. GOOGLE_REDIRECT_URI pins it; otherwise it follows the URL the app is being used at. */
 function googleRedirectUri(req: Request): string {
   if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
   return `${requestBase(req)}/api/google/callback`;
@@ -367,17 +367,33 @@ app.post('/api/agents/:id/connect-whatsapp', wrap(async (req, res, auth) => {
   res.json({ id: a.id, phoneNumberId: a.phoneNumberId, boundAgentId: a.id });
 }));
 
-// --- Google account (one per workspace) behind agents' Gmail / Calendar / Drive connections ---
+// --- Sign in with Google: one Google account per workspace behind agents' Gmail / Calendar / Drive ---
+/** The access the workspace's agents use between them — what "Sign in with Google" in Settings asks for. */
+function agentsGoogleUse(tenantId: string): AgentConnections {
+  const use: AgentConnections = {};
+  for (const a of state.listAgents(tenantId)) {
+    for (const [s, acc] of Object.entries(normalizeConnections(a.connections)) as Array<[keyof AgentConnections, 'read' | 'read_write']>) {
+      if (use[s] !== 'read_write') use[s] = acc;
+    }
+  }
+  return use;
+}
+
 app.get('/api/google/status', wrap(async (_req, res, auth) => {
-  res.json(state.google.status(auth.tenantId));
+  res.json({ ...state.google.status(auth.tenantId), agentsUse: agentsGoogleUse(auth.tenantId) });
 }));
 
-// Start linking: returns Google's consent URL for the pop-up. A nonce cookie ties the callback to this
+// Start "Sign in with Google": returns Google's consent URL for the pop-up. A nonce cookie ties the callback to this
 // browser, so a sign-in link started by someone else can't attach a Google account to their workspace.
 app.post('/api/google/connect', wrap(async (req, res, auth) => {
   const { services } = (req.body ?? {}) as { services?: unknown };
-  const { url, nonce } = state.google.beginAuth({ tenantId: auth.tenantId, username: auth.username, services, redirectUri: googleRedirectUri(req) });
-  const secure = googleRedirectUri(req).startsWith('https:');
+  const redirectUri = googleRedirectUri(req);
+  // Google only sends people back to https (or localhost) — say so here instead of in a Google error page.
+  if (state.google.isConfigured() && redirectUriProblem(redirectUri)) {
+    throw new Error("Sign in with Google only works when Whaser is opened at its secure web address (https://…). Please open Whaser there and try again.");
+  }
+  const { url, nonce } = state.google.beginAuth({ tenantId: auth.tenantId, username: auth.username, services, redirectUri });
+  const secure = redirectUri.startsWith('https:');
   res.cookie(GOOGLE_NONCE_COOKIE, nonce, { httpOnly: true, sameSite: 'lax', secure, maxAge: 10 * 60_000, path: '/api/google/callback' });
   res.json({ url });
 }));
@@ -407,27 +423,6 @@ app.get('/api/google/callback', async (req: Request, res: Response) => {
 app.post('/api/google/disconnect', wrap(async (_req, res, auth) => {
   await state.google.disconnect(auth.tenantId);
   res.json(state.google.status(auth.tenantId));
-}));
-
-// --- Settings: the workspace's own Google OAuth client. The secret is write-only (never sent back). ---
-const googleSettings = (req: Request, tenantId: string) => {
-  const redirectUri = googleRedirectUri(req);
-  return { ...state.google.clientSettings(tenantId), redirectUri, redirectUriProblem: redirectUriProblem(redirectUri), status: state.google.status(tenantId) };
-};
-
-app.get('/api/settings/google', wrap(async (req, res, auth) => {
-  res.json(googleSettings(req, auth.tenantId));
-}));
-
-app.put('/api/settings/google', wrap(async (req, res, auth) => {
-  const { clientId, clientSecret } = (req.body ?? {}) as { clientId?: unknown; clientSecret?: unknown };
-  const { verified } = await state.google.setClient(auth.tenantId, auth.username, { clientId, clientSecret }, googleRedirectUri(req));
-  res.json({ ...googleSettings(req, auth.tenantId), verified });
-}));
-
-app.delete('/api/settings/google', wrap(async (req, res, auth) => {
-  await state.google.removeClient(auth.tenantId);
-  res.json(googleSettings(req, auth.tenantId));
 }));
 
 // --- Settings: the workspace's WhatsApp business number, given out from the operator's Twilio account ---
@@ -737,6 +732,9 @@ app.get('*', (_req: Request, res: Response) => {
 const port = Number(process.env.PORT ?? 8080);
 app.listen(port, '0.0.0.0', () => {
   console.log(`Whaser demo GUI on http://0.0.0.0:${port}  (login: alice/password, bob/password, carol/password)`);
+  const pinned = process.env.GOOGLE_REDIRECT_URI;
+  if (!state.google.isConfigured()) console.log('Sign in with Google: off — set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (see apps/web/README.md) to turn it on for every workspace');
+  else console.log(`Sign in with Google: on (redirect URI ${pinned ?? '<the URL Whaser is opened at>/api/google/callback'}${pinned && redirectUriProblem(pinned) ? ' — ⚠ Google rejects this address: use https on a domain, or localhost' : ''})`);
   if (state.twilio.platform) {
     const base = process.env.TWILIO_WEBHOOK_BASE_URL?.replace(/\/+$/, '') || `http://<this server's public address>:${port}`;
     console.log(`[twilio] in Twilio, set "When a message comes in" (POST) for ${state.twilio.platform.numbers.join(', ')} to ${base}${TWILIO_WEBHOOK_PATH}`);
