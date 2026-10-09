@@ -16,6 +16,9 @@ import { makeAnthropicLike, AnthropicWorkflowLlm } from './anthropic';
 import { scanYad2New, formatListings, isYad2Context } from './yad2';
 import { WorkflowAgentRuntime, CHAT_HISTORY_TOOL } from './workflowRuntime';
 import { GoogleAccounts, googleToolsFor, isGoogleTool, runGoogleTool, connectionsPreamble, describeConnections, normalizeConnections } from './google';
+import { TwilioLines, twilioPlatformFromEnv, inboundTurn, explainTwilioError } from './twilio';
+import { TwilioApiError, TWILIO_SANDBOX_NUMBER } from '../../../packages/whatsapp-gateway/src/twilio';
+import type { TwilioInbound, TwilioStatus } from '../../../packages/whatsapp-gateway/src/twilio';
 import type { AgentConnections } from './google';
 import { BaileysChannel } from './baileys';
 import { TriggerScheduler } from './scheduler';
@@ -42,7 +45,7 @@ export interface ActivityEvent {
   tenantId: string;
   agentId: string;
   agentName: string;
-  channel: 'sim' | 'whatsapp' | 'timer';
+  channel: 'sim' | 'whatsapp' | 'twilio' | 'timer';
   chatId: string | null;
   from: string;
   text: string;
@@ -255,6 +258,8 @@ export class AppState {
   private seq = 0;
   /** Each workspace's linked Google account (OAuth tokens), backing agents' Google connections. */
   readonly google = new GoogleAccounts();
+  /** The operator's Twilio WhatsApp numbers, which workspace holds each, and the agent answering it. */
+  readonly twilio: TwilioLines;
 
   constructor() {
     this.loadBalances();
@@ -298,6 +303,12 @@ export class AppState {
       onBlocked: (reason, msg) => this.lastBlock.set(msg.waMessageId, reason),
     });
 
+    // Twilio WhatsApp: the operator's account + numbers from the env (workspaces claim numbers in Settings).
+    const tw = twilioPlatformFromEnv();
+    if (tw.problem) console.warn(`[twilio] ${tw.problem}`);
+    this.twilio = new TwilioLines(tw.platform);
+    void this.twilio.verify();
+
     // Persisted agents survive restarts: load them + re-bind their SIM number and chat allow-list
     // (chat keys are tenant-scoped so the same contact in two users' accounts can't collide).
     for (const a of loadAgents()) {
@@ -307,6 +318,10 @@ export class AppState {
       for (const c of a.listenChats) this.resolver.bind(this.chatKey(a.tenantId, c.id), { agentId: a.id, tenantId: a.tenantId });
       const m = a.phoneNumberId.match(/^SIM-(\d+)$/);
       if (m) this.simSeq = Math.max(this.simSeq, Number(m[1]) - 1000 + 1);
+    }
+    // Each workspace's Twilio WhatsApp number answers with the agent picked for it.
+    for (const { tenantId, record } of this.twilio.all()) {
+      if (record.agentId && this.getAgent(record.agentId, tenantId)) this.resolver.bind(this.twilioKey(tenantId), { agentId: record.agentId, tenantId });
     }
 
     // Real WhatsApp Cloud API: enabled only when all four env vars are present.
@@ -426,6 +441,132 @@ export class AppState {
       .map((m) => ({ role: m.fromMe ? ('assistant' as const) : ('user' as const), content: m.text.trim() }))
       .filter((m) => m.content);
     if (seeded.length) await this.conversations.append(key, ...seeded);
+  }
+
+  // --- Twilio WhatsApp: a workspace's official business number, answered by one of its agents ---
+  private twilioKey(tenantId: string): string { return `twilio::${tenantId}`; }
+  /** Twilio message SIDs already taken (a webhook can be re-posted) — bounded. */
+  private readonly twilioSeen = new Set<string>();
+  /** The in-flight turn per customer, so their messages are answered in order and memory isn't interleaved. */
+  private readonly twilioQueues = new Map<string, Promise<void>>();
+
+  /** The workspace's Twilio line as the agent page shows it: its number and who answers it. */
+  twilioLine(tenantId: string, agentId: string): { configured: boolean; number: string | null; sandbox: boolean; answersHere: boolean; answeringAgentName: string | null } {
+    const r = this.twilio.get(tenantId);
+    const answering = r?.agentId ? this.getAgent(r.agentId, tenantId) : undefined;
+    return { configured: !!r, number: r?.number ?? null, sandbox: r?.number === TWILIO_SANDBOX_NUMBER, answersHere: answering?.id === agentId, answeringAgentName: answering?.spec.agent_name ?? null };
+  }
+
+  /** The Twilio number an agent answers, or null — for the agents list. */
+  twilioNumberOf(agent: StoredAgent): string | null {
+    const r = this.twilio.get(agent.tenantId);
+    return r?.agentId === agent.id ? r.number : null;
+  }
+
+  /** Make this agent the one that answers the workspace's Twilio number (taking it over from any other),
+   *  or stop it answering. */
+  setTwilioAgent(agentId: string, tenantId: string, enabled: boolean): StoredAgent {
+    const agent = this.getAgent(agentId, tenantId);
+    if (!agent) throw new Error('agent not found');
+    const r = this.twilio.get(tenantId);
+    if (!r) throw new Error('This workspace has no WhatsApp business number yet — get one in ⚙️ Settings first.');
+    if (enabled) {
+      this.twilio.setAgent(tenantId, agentId);
+      this.resolver.bind(this.twilioKey(tenantId), { agentId, tenantId });
+    } else if (r.agentId === agentId) {
+      this.twilio.setAgent(tenantId, null);
+      this.resolver.unbind(this.twilioKey(tenantId));
+    }
+    return agent;
+  }
+
+  /** Give the workspace's number back (Settings → Release); it stops being answered for this workspace. */
+  releaseTwilio(tenantId: string): void {
+    this.twilio.release(tenantId);
+    this.resolver.unbind(this.twilioKey(tenantId));
+  }
+
+  /** An incoming message on a workspace's Twilio number (signature already checked, webhook already
+   *  acknowledged). `reachedAt` is the public base URL the webhook arrived on. */
+  async handleTwilioInbound(tenantId: string, inbound: TwilioInbound, reachedAt: string): Promise<void> {
+    if (this.twilioSeen.has(inbound.messageSid)) return; // a re-posted webhook — already being answered
+    this.twilioSeen.add(inbound.messageSid);
+    if (this.twilioSeen.size > 5000) this.twilioSeen.delete(this.twilioSeen.values().next().value as string);
+    this.twilio.noteInbound(tenantId, inbound.from, reachedAt);
+    const q = `${tenantId}::${inbound.from}`;
+    const run = (this.twilioQueues.get(q) ?? Promise.resolve())
+      .then(() => this.answerTwilio(tenantId, inbound))
+      .catch((e) => console.error('[twilio] inbound error', inbound.messageSid, e));
+    this.twilioQueues.set(q, run);
+    await run;
+    if (this.twilioQueues.get(q) === run) this.twilioQueues.delete(q);
+  }
+
+  /** Answer one Twilio message through the same pipeline every channel uses — resolver → cost/abuse
+   *  breaker → agent runtime → memory — then send the reply back through Twilio's REST API. */
+  private async answerTwilio(tenantId: string, inbound: TwilioInbound): Promise<void> {
+    const line = this.twilio.get(tenantId);
+    const client = this.twilio.client();
+    if (!line || !client) return;
+    const key = this.twilioKey(tenantId);
+    const route = await this.resolver.resolve(key);
+    const agent = route ? this.agents.get(route.agentId) : undefined;
+    if (!agent) {
+      this.twilio.noteProblem(tenantId, 'A message arrived, but no agent answers this number yet — open an agent and choose “📲 Answer on WhatsApp”.');
+      return;
+    }
+    const who = inbound.profileName || inbound.from;
+    const log = (text: string, reply: string | null, blocked: string | null, routedTo: string | null = null) =>
+      this.logActivity({ ts: this.now(), tenantId, agentId: agent.id, agentName: agent.spec.agent_name, channel: 'twilio', chatId: inbound.from, from: who, text, routedTo, reply, blocked });
+    if (agent.status !== 'live') return log(inbound.body, null, 'agent_paused');
+    if (!this.canSpend(tenantId)) return log(inbound.body, null, 'no_balance');
+    const turn = await inboundTurn(client, inbound);
+    if (!turn) return;
+
+    const msg: InboundMessage = { waMessageId: `tw-${inbound.messageSid}`, from: inbound.from, phoneNumberId: key, type: 'text', text: turn.text, currentTurnMedia: turn.media, timestamp: this.now() };
+    let out: Awaited<ReturnType<InboundHandler>>;
+    try {
+      out = await this.handler(msg);
+    } catch (e) {
+      console.error('[twilio] agent failed to answer', inbound.messageSid, e);
+      return log(turn.text, null, 'agent_error');
+    }
+    const blocked = this.lastBlock.get(msg.waMessageId) ?? null;
+    this.lastBlock.delete(msg.waMessageId);
+    const routedTo = out ? this.runtime.lastRoutedTo : null;
+    let sendFailed: string | null = null;
+    if (out?.text) {
+      this.recordSpend(tenantId, this.runtime.lastUsage, agent.id, agent.spec.agent_name);
+      try {
+        await client.sendText(line.number, inbound.from, out.text);
+        this.twilio.noteReply(tenantId);
+      } catch (e) {
+        const code = e instanceof TwilioApiError && e.code != null ? String(e.code) : null;
+        this.twilio.noteProblem(tenantId, code ? explainTwilioError(code) : e instanceof Error ? e.message : String(e), code);
+        sendFailed = `send_failed${code ? `:${code}` : ''}`;
+        console.error('[twilio] reply failed', inbound.messageSid, e);
+      }
+    }
+    const t = this.transcripts.get(agent.id) ?? [];
+    t.push({ role: 'user', content: turn.text });
+    if (out?.text) t.push({ role: 'assistant', content: out.text });
+    this.transcripts.set(agent.id, t.slice(-40));
+    agent.lastActivityAt = this.now();
+    log(turn.text, out?.text ?? null, blocked ?? sendFailed, routedTo);
+  }
+
+  /** A delivery update for a message sent on a workspace's Twilio number. Failures are surfaced (with the
+   *  reason in plain words) in Settings and the activity log, so a reply that never arrived isn't a mystery. */
+  handleTwilioStatus(tenantId: string, s: TwilioStatus): void {
+    if (s.status !== 'failed' && s.status !== 'undelivered') return;
+    const reason = explainTwilioError(s.errorCode);
+    this.twilio.noteProblem(tenantId, reason, s.errorCode);
+    console.warn(`[twilio] ${tenantId}: message ${s.messageSid} to ${s.to ?? '?'} ${s.status} (${s.errorCode ?? 'no code'})`);
+    const agentId = this.twilio.get(tenantId)?.agentId;
+    const agent = agentId ? this.agents.get(agentId) : undefined;
+    if (agent) {
+      this.logActivity({ ts: this.now(), tenantId, agentId: agent.id, agentName: agent.spec.agent_name, channel: 'twilio', chatId: s.to, from: s.to ?? 'Twilio', text: `Reply not delivered — ${reason}`, routedTo: null, reply: null, blocked: `${s.status}${s.errorCode ? `:${s.errorCode}` : ''}` });
+    }
   }
 
   // --- Per-user QR-linked personal WhatsApp (Baileys; POC only) ---
@@ -1152,6 +1293,10 @@ export class AppState {
     this.transcripts.delete(id);
     await this.conversations.purge(id);
     if (this.boundAgentId === id) this.boundAgentId = null;
+    if (this.twilio.get(tenantId)?.agentId === id) {
+      this.resolver.unbind(this.twilioKey(tenantId));
+      try { this.twilio.setAgent(tenantId, null); } catch (e) { console.error('[twilio]', e instanceof Error ? e.message : e); }
+    }
     this.persist();
     return true;
   }

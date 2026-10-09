@@ -1,8 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentTool } from '../../../packages/agent-builder/src/index';
+import { JsonStore, without } from './jsonStore';
 
 /**
  * Google connections — Gmail, Google Calendar and Google Drive for agents.
@@ -182,82 +181,6 @@ function sameSecret(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-/**
- * A tenantId → record JSON file, hardened like persistence.ts: every save rewrites the WHOLE file from
- * memory, so a store that silently loaded as {} would let the next save wipe every workspace's Google
- * tokens. A damaged file is therefore preserved (copied beside it) and the store goes
- * read-only — saves throw — instead of being papered over; the rest of the app keeps running. Odd
- * records are dropped but the original file is kept. Saves are atomic (tmp + rename), owner-only
- * (refresh tokens), and a failed save throws without changing memory.
- */
-class JsonStore<T> {
-  data: Record<string, T> = {};
-  /** Why saving is refused (the file on disk couldn't be trusted), or null. Logged in full at startup. */
-  readonly locked: string | null;
-
-  constructor(private readonly file: string, private readonly what: string, isRecord: (r: unknown) => boolean) {
-    this.locked = this.load(isRecord);
-    if (this.locked) console.error(`[google] ${this.locked} — refusing to save the ${what} until it's fixed (then restart).`);
-  }
-
-  private load(isRecord: (r: unknown) => boolean): string | null {
-    if (!existsSync(this.file)) return null;
-    let raw: string;
-    try {
-      raw = readFileSync(this.file, 'utf8');
-    } catch (e) {
-      return `${this.file} exists but couldn't be read (${e instanceof Error ? e.message : String(e)})`;
-    }
-    if (!raw.trim()) return null;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return `${this.file} isn't valid JSON; a copy was preserved at ${this.preserve(raw)}`;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return `${this.file} has an unexpected shape; a copy was preserved at ${this.preserve(raw)}`;
-    const entries = Object.entries(parsed as Record<string, unknown>);
-    const good = entries.filter(([, r]) => isRecord(r));
-    if (entries.length && !good.length) return `${this.file} has no valid records; a copy was preserved at ${this.preserve(raw)}`;
-    if (good.length !== entries.length) console.error(`[google] dropped ${entries.length - good.length} unreadable record(s) from the ${this.what}; original preserved at ${this.preserve(raw)}`);
-    this.data = Object.fromEntries(good) as Record<string, T>;
-    return null;
-  }
-
-  private preserve(raw: string): string {
-    const bak = `${this.file}.corrupt-${Date.now()}`;
-    try {
-      writeFileSync(bak, raw, { mode: 0o600 });
-    } catch {
-      /* best effort */
-    }
-    return bak;
-  }
-
-  /** Write `next` (default: the current data) and only then make it the in-memory state. */
-  save(next: Record<string, T> = this.data): void {
-    if (this.locked) throw new Error(`Whaser couldn't read its saved Google ${this.what}, so it won't overwrite it. An admin needs to check the server log, fix the file and restart.`);
-    const tmp = `${this.file}.tmp`;
-    try {
-      const dir = dirname(this.file);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      writeFileSync(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });
-      renameSync(tmp, this.file);
-    } catch (e) {
-      try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* ignore */ }
-      console.error(`[google] FAILED to save the ${this.what}:`, e);
-      throw new Error(`Couldn't save the Google ${this.what} on the server.`);
-    }
-    this.data = next;
-  }
-}
-
-/** `data` without one tenant's record. */
-function without<T>(data: Record<string, T>, tenantId: string): Record<string, T> {
-  const { [tenantId]: _gone, ...rest } = data;
-  return rest;
-}
-
 const isObj = (r: unknown): r is Record<string, unknown> => !!r && typeof r === 'object' && !Array.isArray(r);
 const isGrant = (r: unknown): boolean => isObj(r) && typeof r.accessToken === 'string' && typeof r.refreshToken === 'string' && Array.isArray(r.scopes);
 
@@ -268,7 +191,7 @@ export class GoogleAccounts {
   private readonly refreshing = new Map<string, Promise<string>>();
 
   constructor(file = fileURLToPath(new URL('../.data/google-accounts.json', import.meta.url))) {
-    this.grants = new JsonStore<GoogleGrant>(file, 'account links', isGrant);
+    this.grants = new JsonStore<GoogleGrant>(file, 'Google account links', isGrant, 'google');
   }
 
   /** Sign in with Google is turned on for this server (the operator set the OAuth client in the env). */
