@@ -561,6 +561,7 @@ function render(){
   const root = document.getElementById('root');
   root.innerHTML = '';
   if (!token || !user){ root.appendChild(LoginView()); return; }
+  if (view === 'whatsapp' && !features.personalWhatsApp) view = 'settings'; // the WhatsApp number lives in Settings
   root.appendChild(Header());
   const wrap = $('<div class="wrap"></div>');
   root.appendChild(wrap);
@@ -579,7 +580,8 @@ function render(){
 
 function Header(){
   const h = $('<header></header>');
-  const items = [['agents',t('Agents')],['catalog',t('Catalog')],['create',t('+ Create agent')],['whatsapp',t('WhatsApp')],['activity',t('Activity')],['settings',t('⚙️ Settings')]];
+  // The WhatsApp page is only the QR link for a personal WhatsApp (archived); the business number lives in Settings.
+  const items = [['agents',t('Agents')],['catalog',t('Catalog')],['create',t('+ Create agent')],...(features.personalWhatsApp?[['whatsapp',t('WhatsApp')]]:[]),['activity',t('Activity')],['settings',t('⚙️ Settings')]];
   const cur = items.find(i=>i[0]===view) || ((view&&view.startsWith('agent:')) ? items[0] : items[0]);
   h.innerHTML = `<span class="logo">Whaser</span>
     <div class="menu">
@@ -1038,12 +1040,6 @@ async function AgentDetailView(wrap, id){
 }
 
 async function WhatsAppView(wrap){
-  if (!features.personalWhatsApp){
-    wrap.appendChild($('<h1>WhatsApp</h1>'));
-    const card=$('<div class="card"></div>'); wrap.appendChild(card);
-    buildTwilioSettings(card);
-    return;
-  }
   wrap.appendChild($(`<h1>${t('WhatsApp — link your number (QR)')}</h1>`));
   wrap.appendChild($(`<div class="card" style="border-color:#8a6d3b">${t('⚠️ <b>POC only.</b> This links your <i>personal</i> WhatsApp via the unofficial WhatsApp-Web protocol — against WhatsApp\'s ToS, with a real risk of the number being banned. Prefer a spare SIM. The Cloud API path is the production-safe option.')}</div>`));
   const tw = $('<div></div>'); wrap.appendChild(tw);
