@@ -90,6 +90,8 @@ let token = localStorage.getItem('whaser_token');
 let user = JSON.parse(localStorage.getItem('whaser_user') || 'null');
 let mode = 'stub';
 let whatsapp = { configured:false, phoneNumberId:null, boundAgentId:null };
+// Server feature switches. personalWhatsApp = QR-linking a personal WhatsApp (archived: off by default).
+let features = { personalWhatsApp:false };
 let billing = { balance:0, blocked:false, resumeAbove:1 };
 let agentTab = 'simulator'; // active tab on the agent detail page (Schedule / Simulator / Improve)
 let waPollTimer = null;
@@ -331,6 +333,11 @@ const I18N = { he: {
     "Remove": "הסרה",
     "Saving…": "שומר…",
     "Close": "סגירה",
+    "Publish": "פרסום",
+    "Answer on your WhatsApp business number ({0})": "מענה במספר ה-WhatsApp העסקי שלכם ({0})",
+    "instead of “{0}”": "במקום “{0}”",
+    "Linking a personal WhatsApp is turned off — agents answer on the workspace's WhatsApp business number (⚙️ Settings).": "קישור WhatsApp אישי כבוי — הסוכנים עונים במספר ה-WhatsApp העסקי של סביבת העבודה (⚙️ הגדרות).",
+    "Joining WhatsApp groups needs a linked personal WhatsApp, which is turned off on this server — WhatsApp business numbers can't join groups.": "הצטרפות לקבוצות WhatsApp דורשת WhatsApp אישי מקושר, וזה כבוי בשרת הזה — מספרי WhatsApp עסקיים לא יכולים להצטרף לקבוצות.",
     "Whaser was updated.": "Whaser עודכן.",
     "Reload": "טעינה מחדש",
     "👥 Join a group": "👥 הצטרפות לקבוצה",
@@ -529,7 +536,7 @@ function openTriggerBuilder(agentId, agent){
     actions.innerHTML=''; const box=$(`<div class="card" style="margin-top:8px;border-color:var(--accent)"><span class="muted">${t('Designing this action…')}</span></div>`); actions.appendChild(box);
     try{ const r=await api('/api/agents/'+agentId+'/triggers/propose','POST',{ sessionId }); const plan=r.plan;
       const caps=(plan.extensions||[]).map(ext=>`<div style="margin:4px 0"><span class="pill">${ext.kind==='skill'?'🧩':(ext.kind==='workflow'?'🤖':'📎')} ${esc(ext.kind)}</span> <span class="muted" dir="auto">${esc(ext.summary||'')}</span></div>`).join('');
-      const banner=(agent.listenChats||[]).length ? tf("⚠️ When a trigger fires, it sends a REAL WhatsApp message to this agent's {0} chat(s).", agent.listenChats.length) : t('⚠️ No chats selected — fired actions are logged only (no real messages sent).');
+      const banner=(features.personalWhatsApp && (agent.listenChats||[]).length) ? tf("⚠️ When a trigger fires, it sends a REAL WhatsApp message to this agent's {0} chat(s).", agent.listenChats.length) : t('⚠️ No chats selected — fired actions are logged only (no real messages sent).');
       box.innerHTML = `${caps?`<b>${t('New capabilities to add')}</b>${caps}<div style="height:6px"></div>`:''}
         <b>${t('This trigger')}</b>
         <div class="muted" dir="auto" style="margin:4px 0">${esc(plan.trigger.prompt)}</div>
@@ -634,7 +641,7 @@ function LoginView(){
       const body={ username:card.querySelector('#u').value.trim(), password:card.querySelector('#p').value };
       if(signup) body.displayName = (card.querySelector('#dn')||{}).value || '';
       const d = await api(signup?'/api/register':'/api/login','POST',body);
-      token=d.token; user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp; billing=d.billing||billing;
+      token=d.token; user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp; features=d.features||features; billing=d.billing||billing;
       localStorage.setItem('whaser_token',token); localStorage.setItem('whaser_user',JSON.stringify(user)); view='agents'; render();
     }catch(err){ const el=card.querySelector('#e'); if(el) el.textContent = (!signup && /credential|401|unauthor/i.test(err.message)) ? t('Wrong username or password — please try again.') : err.message; } };
   function paint(){ const signup=amode==='signup';
@@ -731,16 +738,16 @@ async function AgentDetailView(wrap, id){
          <div style="margin-top:4px">${a.spec.sub_agents.map(s=>`<span class="pill">🤖 ${esc(s.name)}${s.tool_names.length?(' ['+s.tool_names.map(esc).join(', ')+']'):''}</span>`).join('')}</div></div>`
       : `<div style="margin-top:10px muted"><b>${t('Workflow:')}</b> <span class="muted">${t('single agent')}</span></div>`}
     ${(a.spec.skills&&a.spec.skills.length)?`<div style="margin-top:10px"><b>${t('Skills:')}</b> ${a.spec.skills.map(s=>`<span class="pill" title="${esc(s.description)}">🧩 ${esc(s.name)}</span>`).join('')}</div>`:''}
-    <div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?(`<b>${t('Listening on:')}</b> `+a.listenChats.map(c=>{ const g=String(c.id).endsWith('@g.us');
-      return `<span class="pill">${g?'👥':'💬'} <span dir="auto">${esc(c.name)}</span><button class="chipx" data-leave="${esc(c.id)}" data-name="${esc(c.name)}" title="${esc(g?t('Leave this group'):t('Stop answering this chat'))}" aria-label="${esc(g?t('Leave this group'):t('Stop answering this chat'))}">${g?'🚪':'✕'}</button></span>`; }).join('')):`<span class="muted"><b>${t('Listening on:')}</b> ${t('no chats selected (chosen during creation)')}</span>`}</div>
+    ${!features.personalWhatsApp ? '' : `<div style="margin-top:10px">${(a.listenChats&&a.listenChats.length)?(`<b>${t('Listening on:')}</b> `+a.listenChats.map(c=>{ const g=String(c.id).endsWith('@g.us');
+      return `<span class="pill">${g?'👥':'💬'} <span dir="auto">${esc(c.name)}</span><button class="chipx" data-leave="${esc(c.id)}" data-name="${esc(c.name)}" title="${esc(g?t('Leave this group'):t('Stop answering this chat'))}" aria-label="${esc(g?t('Leave this group'):t('Stop answering this chat'))}">${g?'🚪':'✕'}</button></span>`; }).join('')):`<span class="muted"><b>${t('Listening on:')}</b> ${t('no chats selected (chosen during creation)')}</span>`}</div>`}
     ${a.twilio&&a.twilio.answersHere?`<div style="margin-top:6px"><b>${t('WhatsApp business number:')}</b> ${esc(tf('answers everyone who messages {0}', ltr(a.twilio.number)))}</div>`:''}
     <div style="margin-top:6px" id="connline">${Object.keys(a.connections||{}).length?(`<b>${t('Google:')}</b> `+connectionPills(a.connections)):`<span class="muted"><b>${t('Google:')}</b> ${t('no Google connections')}</span>`}</div>
     <div class="row" style="margin-top:12px"><button id="toggle">${a.status==='live'?t('Pause'):t('Resume')}</button>
     <button class="ghost" id="showspec">${t('View AgentSpec')}</button>
-    <button id="editchats">${t('✏️ Edit chats')}</button>
-    <button id="joingroup">${t('👥 Join a group')}</button>
+    ${features.personalWhatsApp ? `<button id="editchats">${t('✏️ Edit chats')}</button>
+    <button id="joingroup">${t('👥 Join a group')}</button>` : ''}
     <button id="editconns">${t('🔗 Google connections')}</button>
-    <button id="answerself" class="${a.answerSelf?'primary':''}" title="${t('When on, the agent also replies to messages YOU send from your connected WhatsApp.')}">${a.answerSelf?t('🙋 Answer my own messages: On'):t('🙋 Answer my own messages: Off')}</button>
+    ${features.personalWhatsApp ? `<button id="answerself" class="${a.answerSelf?'primary':''}" title="${t('When on, the agent also replies to messages YOU send from your connected WhatsApp.')}">${a.answerSelf?t('🙋 Answer my own messages: On'):t('🙋 Answer my own messages: Off')}</button>` : ''}
     ${a.twilio&&a.twilio.configured ? `<button id="twiliowa" class="${a.twilio.answersHere?'primary':''}">${esc(a.twilio.answersHere?tf('✓ Answering on WhatsApp ({0})', ltr(a.twilio.number)):tf('📲 Answer on WhatsApp ({0})', ltr(a.twilio.number)))}</button>` : ''}
     ${whatsapp.configured ? `<button id="connectwa" class="${whatsapp.boundAgentId===a.id?'':'primary'}">${whatsapp.boundAgentId===a.id?t('✓ Cloud API connected'):tf('📲 Connect Cloud API ({0})', esc(whatsapp.phoneNumberId))}</button>` : ''}
     <button class="danger" id="delete" style="margin-inline-start:auto">${t('🗑 Delete agent')}</button></div>
@@ -749,20 +756,20 @@ async function AgentDetailView(wrap, id){
     <div id="groupjoin"></div>
     <div id="connedit"></div>`;
   head.querySelector('#toggle').onclick = async ()=>{ await api('/api/agents/'+id+'/'+(a.status==='live'?'pause':'resume'),'POST'); render(); };
-  head.querySelector('#answerself').onclick = async ()=>{ try{ await api('/api/agents/'+id+'/answer-self','POST',{ enabled: !a.answerSelf }); render(); }catch(e){ alert(e.message); } };
+  if (features.personalWhatsApp) head.querySelector('#answerself').onclick = async ()=>{ try{ await api('/api/agents/'+id+'/answer-self','POST',{ enabled: !a.answerSelf }); render(); }catch(e){ alert(e.message); } };
   head.querySelector('#delete').onclick = async ()=>{
     const ok = await confirmDialog({ title:t('Delete agent?'), message:tf('"{0}" will be permanently removed, along with its number binding and any chats it listens on. This can\'t be undone.', a.name), confirmLabel:t('🗑 Delete agent'), danger:true });
     if(!ok) return;
     try{ await api('/api/agents/'+id,'DELETE'); if(whatsapp.boundAgentId===id) whatsapp.boundAgentId=null; view='agents'; render(); }
     catch(e){ alert(e.message); } };
   head.querySelector('#showspec').onclick = ()=>{ const p=head.querySelector('#spec'); p.style.display = p.style.display==='none'?'block':'none'; };
-  head.querySelector('#editchats').onclick = ()=>{ const c=head.querySelector('#chatedit');
+  if (features.personalWhatsApp) head.querySelector('#editchats').onclick = ()=>{ const c=head.querySelector('#chatedit');
     if (c.dataset.open){ c.innerHTML=''; delete c.dataset.open; return; }
     c.dataset.open='1';
     buildChatPicker(c, a.listenChats||[], t('Save chats'), async (chats, btn)=>{ btn.disabled=true;
       try{ await api('/api/agents/'+id+'/chats','POST',{ chats }); render(); }
       catch(e){ alert(e.message); btn.disabled=false; } }); };
-  head.querySelector('#joingroup').onclick = ()=>{ const c=head.querySelector('#groupjoin');
+  if (features.personalWhatsApp) head.querySelector('#joingroup').onclick = ()=>{ const c=head.querySelector('#groupjoin');
     if (c.dataset.open){ c.innerHTML=''; delete c.dataset.open; return; }
     c.dataset.open='1';
     buildGroupJoin(c, { agentId:id, onJoined:()=>setTimeout(()=>{ if(view==='agent:'+id) render(); }, 1500) }); };
@@ -817,7 +824,7 @@ async function AgentDetailView(wrap, id){
 
   // ⏰ Scheduled triggers — actions the agent runs automatically on a cadence (fires + sends to its chats).
   {
-    const chatCount = (a.listenChats||[]).length;
+    const chatCount = features.personalWhatsApp ? (a.listenChats||[]).length : 0;
     const dangerBanner = chatCount
       ? tf("⚠️ When a trigger fires, it sends a REAL WhatsApp message to this agent's {0} chat(s).", chatCount)
       : t('⚠️ No chats selected — fired actions are logged only (no real messages sent).');
@@ -1027,6 +1034,12 @@ async function AgentDetailView(wrap, id){
 }
 
 async function WhatsAppView(wrap){
+  if (!features.personalWhatsApp){
+    wrap.appendChild($('<h1>WhatsApp</h1>'));
+    const card=$('<div class="card"></div>'); wrap.appendChild(card);
+    buildTwilioSettings(card);
+    return;
+  }
   wrap.appendChild($(`<h1>${t('WhatsApp — link your number (QR)')}</h1>`));
   wrap.appendChild($(`<div class="card" style="border-color:#8a6d3b">${t('⚠️ <b>POC only.</b> This links your <i>personal</i> WhatsApp via the unofficial WhatsApp-Web protocol — against WhatsApp\'s ToS, with a real risk of the number being banned. Prefer a spare SIM. The Cloud API path is the production-safe option.')}</div>`));
   const tw = $('<div></div>'); wrap.appendChild(tw);
@@ -1472,16 +1485,30 @@ async function CreateView(wrap){
         setBusy(true); // design is done — lock the chat while picking chats + publishing
         const connBox=$('<div></div>'); box.appendChild(connBox);
         const conns=buildConnectionsPicker(connBox, r.suggestedConnections||{}, { suggested:true, optional:true });
-        box.appendChild($(`<div class="muted" style="margin-top:8px">${t('Choose which WhatsApp chats this agent should answer, then publish. Chats are optional — you can publish now and bind them later.')}</div>`));
-        const pick=$('<div></div>'); box.appendChild(pick);
-        // allowEmpty: publishing is never blocked by an unlinked WhatsApp or an empty selection.
-        buildChatPicker(pick, [], t('Publish & bind a number'), async (chats, saveBtn)=>{ saveBtn.disabled=true;
+        let answerOnNumber=null; // the "answer on the business number" checkbox, when the workspace has one
+        const publish=async (chats, saveBtn)=>{ saveBtn.disabled=true;
           try{ await api('/api/wizard/select-chats','POST',{ sessionId, chats });
             const pub=await api('/api/wizard/publish','POST',{ sessionId, connections: conns.get() });
+            if (answerOnNumber && answerOnNumber.checked) await api('/api/agents/'+pub.agentId+'/twilio','POST',{ enabled:true });
             box.appendChild($(`<div class="ok" style="margin-top:10px">${tf('Published as {0} on {1}. Opening…', esc(pub.agentId), esc(pub.phoneNumberId))}</div>`));
             if (pub.ownerStyled) box.appendChild($(`<div class="muted" style="margin-top:4px">${t('✓ Tuned to write in your personal style.')}</div>`));
             setTimeout(()=>{ view='agent:'+pub.agentId; render(); }, 700);
-          }catch(e){ alert(e.message); saveBtn.disabled=false; } }, { allowEmpty: true });
+          }catch(e){ alert(e.message); saveBtn.disabled=false; } };
+        if (features.personalWhatsApp){
+          box.appendChild($(`<div class="muted" style="margin-top:8px">${t('Choose which WhatsApp chats this agent should answer, then publish. Chats are optional — you can publish now and bind them later.')}</div>`));
+          const pick=$('<div></div>'); box.appendChild(pick);
+          // allowEmpty: publishing is never blocked by an unlinked WhatsApp or an empty selection.
+          buildChatPicker(pick, [], t('Publish & bind a number'), publish, { allowEmpty: true });
+        } else {
+          const numBox=$('<div style="margin-top:10px"></div>'); box.appendChild(numBox);
+          const pb=$(`<button class="primary" style="margin-top:10px">${t('Publish')}</button>`); box.appendChild(pb);
+          pb.onclick=()=>publish([], pb);
+          api('/api/settings/twilio').then(ts=>{ if (!ts.number) return;
+            const lbl=$(`<label style="display:flex;gap:8px;align-items:center;color:var(--text);font-size:14.5px"><input type="checkbox" style="width:auto"/><span></span></label>`);
+            lbl.querySelector('span').textContent = tf('Answer on your WhatsApp business number ({0})', ltr(ts.number)) + (ts.agentName ? ' — ' + tf('instead of “{0}”', ts.agentName) : '');
+            answerOnNumber=lbl.querySelector('input'); answerOnNumber.checked=!ts.agentName; numBox.appendChild(lbl);
+          }).catch(()=>{});
+        }
       } else {
         btn.disabled=false; // let the user refine in chat and rebuild
       }
@@ -1489,7 +1516,7 @@ async function CreateView(wrap){
   }
 }
 
-(async function init(){ if (token){ try{ const d=await api('/api/me'); user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp; billing=d.billing||billing; }catch{} } render(); })();
+(async function init(){ if (token){ try{ const d=await api('/api/me'); user=d.user; mode=d.mode||'stub'; whatsapp=d.whatsapp||whatsapp; features=d.features||features; billing=d.billing||billing; }catch{} } render(); })();
 </script>
 </body>
 </html>

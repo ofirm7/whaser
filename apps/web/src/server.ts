@@ -237,7 +237,7 @@ app.post('/api/login', async (req: Request, res: Response) => {
     role: u.role,
   };
   tokens.set(token, user);
-  res.json({ token, user, mode: state.mode, whatsapp: state.whatsappStatus(), billing: state.billingState(user.tenantId) });
+  res.json({ token, user, mode: state.mode, whatsapp: state.whatsappStatus(), features: { personalWhatsApp: state.personalWhatsApp }, billing: state.billingState(user.tenantId) });
 });
 
 app.post('/api/register', async (req: Request, res: Response) => {
@@ -256,7 +256,7 @@ app.post('/api/register', async (req: Request, res: Response) => {
   const token = randomBytes(24).toString('hex');
   const user: SessionUser = { username: u.username, displayName: u.displayName, tenantId: u.tenantId, tenantName: u.tenantName, role: u.role };
   tokens.set(token, user);
-  res.json({ token, user, mode: state.mode, whatsapp: state.whatsappStatus(), billing: state.billingState(user.tenantId) });
+  res.json({ token, user, mode: state.mode, whatsapp: state.whatsappStatus(), features: { personalWhatsApp: state.personalWhatsApp }, billing: state.billingState(user.tenantId) });
 });
 
 app.get('/api/me', (req: Request, res: Response) => {
@@ -265,7 +265,7 @@ app.get('/api/me', (req: Request, res: Response) => {
     res.sendStatus(401);
     return;
   }
-  res.json({ user: auth, mode: state.mode, whatsapp: state.whatsappStatus(), tenantTokensUsed: state.tenantUsage(auth.tenantId), billing: state.billingState(auth.tenantId) });
+  res.json({ user: auth, mode: state.mode, whatsapp: state.whatsappStatus(), features: { personalWhatsApp: state.personalWhatsApp }, tenantTokensUsed: state.tenantUsage(auth.tenantId), billing: state.billingState(auth.tenantId) });
 });
 
 // --- Billing (per-tenant USD balance; AI stops at $0, resumes above $1) ---

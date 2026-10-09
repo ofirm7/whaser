@@ -126,7 +126,18 @@ scopes (Calendar's are *sensitive*) — fine for test users, but opening sign-in
 Google's app verification (for Gmail/Drive, including a security assessment). That's done once, by the
 operator, for the whole Whaser deployment.
 
+## Personal WhatsApp (QR link) — archived
+
+Linking a personal WhatsApp account by QR code is **switched off**: agents answer only on the workspace's
+WhatsApp business number (see below). The code is kept — set `WHASER_PERSONAL_WHATSAPP=on` in
+`apps/web/.env` and restart to bring back the QR link and everything built on it: the chat picker,
+groups by invite link, "answer my own messages", copying the owner's writing style, and timed actions
+that message chats. While it's off, sessions saved in `.wa-auth/` stay on disk but never connect, and
+`/api/wa/status` reports `disabled`.
+
 ## WhatsApp groups (invite links)
+
+> Needs the personal WhatsApp link above, which is archived (off) by default.
 
 An agent can be put into a WhatsApp group from the group's **invite link** (in WhatsApp: group info →
 Invite via link). On the agent page click **👥 Join a group**, paste the link and **Preview** — Whaser shows
