@@ -261,6 +261,10 @@ export class AppState {
   readonly google = new GoogleAccounts();
   /** The operator's Twilio WhatsApp numbers, which workspace holds each, and the agent answering it. */
   readonly twilio: TwilioLines;
+  /** QR-linking a personal WhatsApp (Baileys) — archived: off unless WHASER_PERSONAL_WHATSAPP=on. While
+   *  off, no linked account connects (their sessions stay on disk) and agents answer only on the
+   *  workspace's WhatsApp business number. */
+  readonly personalWhatsApp = process.env.WHASER_PERSONAL_WHATSAPP === 'on';
 
   constructor() {
     this.loadBalances();
@@ -342,8 +346,13 @@ export class AppState {
 
     // Per-user WhatsApp: migrate the legacy single link into tenant "acme" once, then reconnect
     // every tenant that has linked before (each its own channel). New users link on demand.
-    this.migrateLegacyLink();
-    for (const t of this.linkedTenants()) void this.channelFor(t).start().catch((e) => console.error('[baileys] auto-start', t, e));
+    if (this.personalWhatsApp) {
+      this.migrateLegacyLink();
+      for (const t of this.linkedTenants()) void this.channelFor(t).start().catch((e) => console.error('[baileys] auto-start', t, e));
+    } else {
+      const linked = this.linkedTenants().length;
+      if (linked) console.log(`[baileys] personal WhatsApp linking is archived (WHASER_PERSONAL_WHATSAPP is off) — not reconnecting ${linked} linked account(s); their sessions stay on disk`);
+    }
 
     // Load the global agents-catalog from committed seed files (once, at startup).
     this.loadCatalog();
@@ -616,10 +625,12 @@ export class AppState {
   }
 
   async startPersonalLink(tenantId: string): Promise<void> {
+    if (!this.personalWhatsApp) throw new Error("Linking a personal WhatsApp is turned off — agents answer on the workspace's WhatsApp business number (⚙️ Settings).");
     await this.channelFor(tenantId).start();
   }
 
   personalLinkStatus(tenantId: string): { status: string; qrDataUrl: string | null; me: string | null } {
+    if (!this.personalWhatsApp) return { status: 'disabled', qrDataUrl: null, me: null };
     const ch = this.channelFor(tenantId);
     if (ch.getStatus().status === 'disconnected') void ch.start().catch((e) => console.error('[baileys] start', tenantId, e));
     return ch.getStatus();
@@ -744,6 +755,7 @@ export class AppState {
 
   /** The tenant's linked WhatsApp, or a plain explanation of why groups can't be joined yet. */
   private groupChannel(tenantId: string): BaileysChannel {
+    if (!this.personalWhatsApp) throw new Error("Joining WhatsApp groups needs a linked personal WhatsApp, which is turned off on this server — WhatsApp business numbers can't join groups.");
     const ch = this.channels.get(tenantId);
     if (!ch || ch.getStatus().status !== 'connected') {
       throw new Error("Groups are joined by your linked WhatsApp account — WhatsApp business numbers can't join groups. Link a WhatsApp account on the WhatsApp page first.");
